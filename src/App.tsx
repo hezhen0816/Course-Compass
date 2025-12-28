@@ -39,6 +39,9 @@ export default function NTUSTCoursePlanner() {
     data.semesters.forEach(sem => {
       let hasPE = false;
       sem.courses.forEach(course => {
+        // 修正：確保 credits 是有效數字
+        const credits = isNaN(course.credits) ? 0 : course.credits;
+
         if (course.category === 'pe') {
           hasPE = true;
           return; 
@@ -49,18 +52,18 @@ export default function NTUSTCoursePlanner() {
             return;
         }
 
-        current.total += course.credits;
+        current.total += credits;
 
-        if (course.category === 'chinese') current.chinese += course.credits;
-        if (course.category === 'english') current.english += course.credits;
+        if (course.category === 'chinese') current.chinese += credits;
+        if (course.category === 'english') current.english += credits;
         if (course.category === 'gen_ed') {
-            current.gen_ed += course.credits;
+            current.gen_ed += credits;
             if (course.dimension && course.dimension !== 'None') {
                 current.genEdDimensions.add(course.dimension);
             }
         }
-        if (course.category === 'compulsory') current.compulsory += course.credits;
-        if (course.category === 'elective') current.elective += course.credits;
+        if (course.category === 'compulsory') current.compulsory += credits;
+        if (course.category === 'elective') current.elective += credits;
       });
       if (hasPE) current.pe_semesters += 1;
     });
@@ -217,10 +220,14 @@ export default function NTUSTCoursePlanner() {
           category = 'social';
       }
   
+      // 修正：加入 isNaN 檢查，若解析失敗則預設為 0
+      let credits = parseFloat(creditsStr);
+      if (isNaN(credits)) credits = 0;
+
       const course: Course = {
           id: code || Date.now().toString() + Math.random(),
           name: name,
-          credits: parseFloat(creditsStr),
+          credits: credits,
           category: category,
           dimension: dimension,
           grade: grade
