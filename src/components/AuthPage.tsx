@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { GraduationCap, AlertCircle, User } from 'lucide-react'; // 加入 User icon
+import { GraduationCap, AlertCircle, User, ShieldCheck } from 'lucide-react'; // 加入 User icon
 import { supabase } from '../supabase';
+import { PrivacyPolicyModal } from './PrivacyPolicyModal';
 
 // 新增 Props 定義
 interface AuthPageProps {
@@ -12,6 +13,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onGuestLogin }) => {
   const [password, setPassword] = useState('');
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [loading, setLoading] = useState(false);
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,15 +102,28 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onGuestLogin }) => {
           </button>
         </div>
 
-        <div className="mt-4 text-center">
+        <div className="mt-4 text-center space-y-3">
           <button
             onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-            className="text-sm text-blue-600 hover:text-blue-500"
+            className="text-sm text-blue-600 hover:text-blue-500 block w-full"
           >
             {authMode === 'login' ? '沒有帳號？點此註冊' : '已有帳號？點此登入'}
           </button>
+
+          <button
+            onClick={() => setIsPrivacyOpen(true)}
+            className="text-xs text-gray-400 hover:text-gray-600 flex items-center justify-center gap-1 w-full"
+          >
+            <ShieldCheck className="w-3 h-3" />
+            隱私權與安全說明
+          </button>
         </div>
       </div>
+
+      <PrivacyPolicyModal 
+        isOpen={isPrivacyOpen} 
+        onClose={() => setIsPrivacyOpen(false)} 
+      />
     </div>
   );
 };
