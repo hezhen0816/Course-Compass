@@ -1,0 +1,304 @@
+import { useState, useMemo } from 'react';
+import type { Course, CourseCategory, GenEdDimension } from './types';
+import { INITIAL_SEMESTERS } from './constants';
+import { useAuth } from './hooks/useAuth';
+import { useCourseData } from './hooks/useCourseData';
+import { AuthPage } from './components/AuthPage';
+import { Navbar } from './components/Navbar';
+import { Sidebar } from './components/Sidebar';
+import { SemesterGrid } from './components/SemesterGrid';
+import { CourseModal } from './components/CourseModal';
+import { SettingsModal } from './components/SettingsModal';
+
+export default function NTUSTCoursePlanner() {
+  const { session, loading: authLoading } = useAuth();
+  const [isGuestMode, setIsGuestMode] = useState(false); // 新增訪客模式狀態
+  
+  // 傳入 session (如果是訪客模式則為 null，useCourseData 會自動處理)
+  const { data, setData, syncStatus, isLoading: dataLoading } = useCourseData(session);
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCourse, setEditingCourse] = useState<{ semesterId: string, course: Course } | null>(null);
+  const [activeSemesterId, setActiveSemesterId] = useState<string>('1-1');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // --- Computed Stats ---
+  const stats = useMemo(() => {
+    const current = {
+      total: 0,
+      chinese: 0,
+      english: 0,
+      gen_ed: 0,
+      pe_semesters: 0,
+      social: 0,
+      compulsory: 0,
+      elective: 0,
+      genEdDimensions: new Set<string>(),
+    };
+
+    data.semesters.forEach(sem => {
+      let hasPE = false;
+      sem.courses.forEach(course => {
+        if (course.category === 'pe') {
+          hasPE = true;
+          return; 
+        }
+        
+        if (course.category === 'social') {
+            current.social += 1;
+            return;
+        }
+
+        current.total += course.credits;
+
+        if (course.category === 'chinese') current.chinese += course.credits;
+        if (course.category === 'english') current.english += course.credits;
+        if (course.category === 'gen_ed') {
+            current.gen_ed += course.credits;
+            if (course.dimension && course.dimension !== 'None') {
+                current.genEdDimensions.add(course.dimension);
+            }
+        }
+        if (course.category === 'compulsory') current.compulsory += course.credits;
+        if (course.category === 'elective') current.elective += course.credits;
+      });
+      if (hasPE) current.pe_semesters += 1;
+    });
+
+    return current;
+  }, [data]);
+
+  // --- Handlers ---
+
+  const handleOpenAdd = (semesterId: string) => {
+    setActiveSemesterId(semesterId);
+    setEditingCourse(null);
+    setIsModalOpen(true);
+  };
+
+  const handleEdit = (semesterId: string, course: Course) => {
+    setActiveSemesterId(semesterId);
+    setEditingCourse({ semesterId, course });
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = (semesterId: string, courseId: string) => {
+    if (!window.confirm('確定要刪除這門課程嗎？')) return;
+    setData(prev => ({
+      ...prev,
+      semesters: prev.semesters.map(s => {
+        if (s.id !== semesterId) return s;
+        return { ...s, courses: s.courses.filter(c => c.id !== courseId) };
+      })
+    }));
+  };
+
+  const handleSaveCourse = (newCourse: Course) => {
+    setData(prev => {
+      const newSemesters = prev.semesters.map(s => {
+        if (s.id !== activeSemesterId) {
+          if (editingCourse && editingCourse.semesterId === s.id && editingCourse.semesterId !== activeSemesterId) {
+             return { ...s, courses: s.courses.filter(c => c.id !== editingCourse.course.id) };
+          }
+          return s;
+        }
+
+        if (editingCourse && editingCourse.semesterId === activeSemesterId) {
+          return {
+            ...s,
+            courses: s.courses.map(c => c.id === editingCourse.course.id ? newCourse : c)
+          };
+        } else {
+          return { ...s, courses: [...s.courses, newCourse] };
+        }
+      });
+
+      return { ...prev, semesters: newSemesters };
+    });
+
+    setIsModalOpen(false);
+  };
+
+  const handleSaveSettings = (newTargets: any) => {
+    setData(prev => ({
+      ...prev,
+      targets: newTargets
+    }));
+    setIsSettingsOpen(false);
+  };
+
+  const resetData = () => {
+    if (confirm('確定要重置所有資料嗎？此操作無法復原。')) {
+        setData({
+            semesters: INITIAL_SEMESTERS,
+            targets: {
+              total: 128,
+              chinese: 3,
+              english: 12,
+              gen_ed: 16,
+              pe_semesters: 6,
+              social: 1,
+            }
+        });
+    }
+  }
+
+  const parseAndImportData = (html: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    const tables = doc.querySelectorAll('table');
+    let targetTable: Element | null = null;
+    
+    for (const table of tables) {
+      if (table.textContent?.includes('課程名稱') && table.textContent?.includes('學分數')) {
+        targetTable = table;
+        break;
+      }
+    }
+  
+    if (!targetTable) {
+      alert('找不到成績列表，請確認上傳的檔案是否正確 (需包含歷年學業成績列表)');
+      return;
+    }
+  
+    const rows = targetTable.querySelectorAll('tbody tr');
+    const newCourses: { semesterId: string, course: Course }[] = [];
+    let minYear = 999;
+  
+    rows.forEach((row: Element) => {
+      const cells = row.querySelectorAll('td');
+      if (cells.length < 8) return;
+      const semStr = cells[1].textContent?.trim() || ''; 
+      if (semStr.length === 4) {
+        const y = parseInt(semStr.substring(0, 3));
+        if (y < minYear) minYear = y;
+      }
+    });
+  
+    if (minYear === 999) {
+       minYear = 114; 
+    }
+  
+    rows.forEach((row: Element) => {
+      const cells = row.querySelectorAll('td');
+      if (cells.length < 8) return;
+  
+      const semStr = cells[1].textContent?.trim() || '';
+      const code = cells[2].textContent?.trim() || '';
+      const name = cells[3].textContent?.trim() || '';
+      const creditsStr = cells[4].textContent?.trim() || '0';
+      const grade = cells[5].textContent?.trim() || '';
+      const dimensionStr = cells[7].textContent?.trim() || '';
+  
+      if (!semStr || !name) return;
+  
+      const y = parseInt(semStr.substring(0, 3));
+      const s = parseInt(semStr.substring(3, 4));
+      const gradeLevel = y - minYear + 1;
+      const semesterId = `${gradeLevel}-${s}`;
+  
+      let category: CourseCategory = 'unclassified'; 
+      let dimension: GenEdDimension = 'None';
+  
+      if (dimensionStr) {
+          category = 'gen_ed';
+          const dimChar = dimensionStr.charAt(0).toUpperCase();
+          if (['A','B','C','D','E','F'].includes(dimChar)) {
+              dimension = dimChar as GenEdDimension;
+          }
+      } else if (code.startsWith('PE') || name.includes('體育')) {
+          category = 'pe';
+      } else if (name.includes('國文') || name.includes('中文')) {
+          category = 'chinese';
+      } else if (name.includes('英文') || name.includes('English')) {
+          category = 'english';
+      } else if (name.includes('社會實踐')) {
+          category = 'social';
+      }
+  
+      const course: Course = {
+          id: code || Date.now().toString() + Math.random(),
+          name: name,
+          credits: parseFloat(creditsStr),
+          category: category,
+          dimension: dimension,
+          grade: grade
+      };
+  
+      newCourses.push({ semesterId, course });
+    });
+  
+    if (newCourses.length === 0) {
+        alert('未找到可匯入的課程資料');
+        return;
+    }
+
+    setData(prev => {
+        const newSemesters = prev.semesters.map(sem => {
+            const coursesToAdd = newCourses
+              .filter(nc => nc.semesterId === sem.id)
+              .map(nc => nc.course);
+            
+            const existingNames = new Set(sem.courses.map(c => c.name));
+            const uniqueCoursesToAdd = coursesToAdd.filter(c => !existingNames.has(c.name));
+  
+            return {
+                ...sem,
+                courses: [...sem.courses, ...uniqueCoursesToAdd]
+            };
+        });
+        return { ...prev, semesters: newSemesters };
+    });
+    
+    alert(`成功匯入 ${newCourses.length} 門課程！`);
+  };
+
+  // 修改載入判斷：如果是訪客模式，就不需要等待 dataLoading (因為沒有雲端資料要載入)
+  if (authLoading || (session && dataLoading)) {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50">載入中...</div>;
+  }
+
+  // 修改登入判斷：如果沒有 session 且不是訪客模式，顯示登入頁
+  if (!session && !isGuestMode) {
+    return <AuthPage onGuestLogin={() => setIsGuestMode(true)} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar 
+        userEmail={session?.user?.email || "訪客 (資料僅暫存)"} // 顯示訪客標示
+        syncStatus={session ? syncStatus : 'idle'} // 訪客模式不顯示同步狀態
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onImport={parseAndImportData}
+        onReset={resetData}
+      />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <Sidebar data={data} stats={stats} />
+          <SemesterGrid 
+            data={data} 
+            onEdit={handleEdit} 
+            onDelete={handleDelete} 
+            onAdd={handleOpenAdd} 
+          />
+        </div>
+      </main>
+
+      <CourseModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSave={handleSaveCourse}
+        editingCourse={editingCourse ? editingCourse.course : null}
+      />
+
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        onSave={handleSaveSettings}
+        initialSettings={data.targets}
+      />
+    </div>
+  );
+}
