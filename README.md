@@ -1,43 +1,54 @@
-# 🎓 修課規劃助手 (Course Planning Assistant)
+# 修課規劃助手
 
-專為臺科大學生設計的現代化課程規劃與學分管理工具，幫助您輕鬆掌握畢業進度。
+同一個 repo 內同時保留兩條產品線：
 
-## ✨ 主要功能
+- `Web`：專注課程規劃、課程匯入、學分門檻管理與詳細資訊編修。
+- `iOS`：原生 SwiftUI App，承接首頁摘要、課表、待辦、提醒與手機版學分規劃。
 
-*   **📊 智慧儀表板**：自動統計系必修、選修、通識（含向度）、體育等各類學分，距離畢業門檻一目了然。
-*   **🚀 一鍵匯入**：支援直接匯入學校成績查詢系統的網頁檔 (`.html`)，秒速同步歷年成績，免去手動輸入。
-*   **🧮 成績試算機**：每門課皆可獨立設定評分項目（期中、期末、作業）與權重，自動預測學期成績與 GPA。
-*   **📝 生存筆記**：記錄課程評價、教授風格與考試重點，建立專屬於你的修課攻略。
-*   **☁️ 雲端同步**：支援 Supabase 帳號登入，資料自動備份於雲端；亦提供「功能演示」供快速試用（資料不儲存）。
+這樣的分工可以避免 Web 與 iOS 互相拖累，同時保留最適合各自裝置的操作模式。
 
-## 🛠️ 技術架構
+## 產品邊界
 
-*   **前端核心**: React 19, TypeScript, Vite
-*   **介面設計**: Tailwind CSS, Lucide Icons
-*   **後端服務**: Supabase (Authentication, PostgreSQL)
-*   **部署平台**: Vercel
+### Web 版
 
-## 🚀 快速開始
+- React + Vite 單頁應用。
+- 保留 Supabase 登入與同步。
+- 保留 HTML 匯入、八學期編排、學分統計、課程詳細資訊與成績試算。
+- 不再承接首頁摘要、待辦、提醒或手機導向課表。
 
-1.  **登入/試用**：選擇註冊帳號以保存資料，或使用功能演示體驗。
-2.  **匯入成績**：登入學校成績查詢系統，將頁面存為 `.html`，點擊右上角「匯入成績」即可。
-3.  **規劃課程**：點擊「+」新增下學期課程，或點擊課程卡片上的「ℹ️」進行成績試算。
+### iOS 版
 
-## 📱 iOS 封裝
+- `iOS 17+` 原生 SwiftUI。
+- 目前為 UI / mock shell，不串接 WebView、Supabase 或校務系統。
+- 以 `TabView` 提供首頁、課表、學分規劃、設定四個原生分頁。
 
-專案已接上 Capacitor，可包成 iOS App。
+## 開發指令
 
-1.  **同步 Web 到 iOS 專案**：執行 `npm run ios:sync`
-2.  **開啟 Xcode**：執行 `npm run ios:open`
-3.  **首次使用前置條件**：
-    需要安裝完整 Xcode，不只 Command Line Tools。
-4.  **如果 `xcodebuild` 找不到 Xcode**：
-    執行 `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
-5.  **目前 iOS 專案路徑**：
-    `ios/App/App.xcodeproj`
+### Web
 
-注意：
-目前功能邏輯可直接沿用，但 `.html` 匯入流程仍需在實機或模擬器上額外驗證檔案挑選體驗。
+```bash
+npm run web:dev
+npm run web:build
+```
+
+`dev` / `build` 目前仍等同於 Web 版指令。
+
+### iOS
+
+```bash
+npm run ios:open
+npm run ios:build
+```
+
+- `ios:open`：直接開啟 `ios/App/App.xcodeproj`
+- `ios:build`：用 `xcodebuild` 驗證原生 iOS target 可編譯
+
+## 建議維護方式
+
+1. Web 與 iOS 分開定義產品責任，不共用畫面層。
+2. 若未來要串接真資料，優先抽出共用的資料規則與 mapping，不共用 UI 狀態。
+3. Web 端只處理大螢幕最有價值的規劃流程；行動版需求直接落在原生 iOS。
 
 ---
-*Developed by Hezhen*
+
+Developed by Hezhen

@@ -4,17 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "web:dev": "vite",
+    "web:build": "tsc -b && vite build",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "cap:sync": "npm run build && npx cap sync",
-    "ios:sync": "npm run build && npx cap sync ios",
-    "ios:open": "npx cap open ios"
+    "ios:open": "open ios/App/App.xcodeproj",
+    "ios:build": "xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build"
   },
   "dependencies": {
-    "@capacitor/core": "^8.2.0",
-    "@capacitor/ios": "^8.2.0",
     "@supabase/supabase-js": "^2.89.0",
     "@vercel/analytics": "^1.6.1",
     "lucide-react": "^0.562.0",
@@ -22,7 +21,6 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.2.0",
     "@eslint/js": "^9.39.1",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^24.10.1",

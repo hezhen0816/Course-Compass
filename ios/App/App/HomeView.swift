@@ -86,7 +86,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader(title: "即將到來的課程", subtitle: "接下來需要準備的課程與提醒")
 
-            ForEach(store.upcomingCourses) { course in
+            ForEach(store.orderedUpcomingCourses) { course in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text(course.weekday.fullTitle)

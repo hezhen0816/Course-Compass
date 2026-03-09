@@ -118,7 +118,14 @@ final class AppSessionStore: ObservableObject {
     }
 
     var nextUpcomingCourse: UpcomingCourse? {
-        upcomingCourses.first
+        orderedUpcomingCourses.first
+    }
+
+    var orderedUpcomingCourses: [UpcomingCourse] {
+        let referenceDate = Date()
+        return upcomingCourses.sorted {
+            nextOccurrenceDate(for: $0, from: referenceDate) < nextOccurrenceDate(for: $1, from: referenceDate)
+        }
     }
 
     var plannerProgress: PlannerProgress {
@@ -153,5 +160,20 @@ final class AppSessionStore: ObservableObject {
 
     func updateTargets(_ targets: PlannerTarget) {
         plannerTargets = targets
+    }
+
+    private func nextOccurrenceDate(for course: UpcomingCourse, from referenceDate: Date) -> Date {
+        let calendar = Calendar(identifier: .gregorian)
+        var components = DateComponents()
+        components.weekday = course.weekday.calendarWeekday
+        components.hour = course.startTime.hour
+        components.minute = course.startTime.minute
+
+        return calendar.nextDate(
+            after: referenceDate.addingTimeInterval(-1),
+            matching: components,
+            matchingPolicy: .nextTimePreservingSmallerComponents,
+            direction: .forward
+        ) ?? referenceDate
     }
 }

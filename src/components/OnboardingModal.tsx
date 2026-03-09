@@ -18,26 +18,26 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
 
   const steps = [
     {
-      title: "歡迎使用修課規劃助手",
-      description: "這是一個專為台科大學生設計的課程規劃工具，幫助您輕鬆管理學分、計算成績並規劃畢業路徑。",
+      title: "歡迎使用 Web 課程規劃版",
+      description: "這個版本專注在桌面上的課程編排、學分統計與畢業門檻管理，保留最適合大螢幕操作的規劃流程。",
       icon: <LayoutDashboard className="w-16 h-16 text-blue-500" />,
       color: "bg-blue-50"
     },
     {
       title: "快速匯入課程",
-      description: "支援兩種匯入方式！成績查詢系統 (含成績資訊) 或選課清單 (快速規劃)。只要下載網頁 (.html)，點擊右上角的「匯入成績」即可一鍵同步所有課程。",
+      description: "支援成績查詢系統與選課清單兩種 HTML 匯入來源。下載校務頁面後，直接上傳到 Web 版即可補齊規劃資料。",
       icon: <Upload className="w-16 h-16 text-green-500" />,
       color: "bg-green-50"
     },
     {
-      title: "全新！課程詳細資訊",
-      description: "點擊課程卡片上的 ℹ️ 按鈕，即可開啟「成績試算機」與「生存筆記」。記錄教授評價、計算期末需要考幾分，掌握歐趴關鍵！",
+      title: "課程細節仍留在 Web",
+      description: "課程卡片內仍可編輯詳細資訊、評分項目與筆記。這些互動維持在 Web，避免手機上塞進太多密集編修流程。",
       icon: <Calculator className="w-16 h-16 text-purple-500" />,
       color: "bg-purple-50"
     },
     {
-      title: "即時學分統計",
-      description: "左側儀表板會自動統計必修、選修、通識等各類學分，並顯示距離畢業門檻還差多少，讓您隨時掌握進度。",
+      title: "與 iOS 版分工",
+      description: "首頁摘要、課表、待辦與提醒將交給原生 iOS App。這樣 Web 與 iOS 可以並行保留，但各自維持清楚的產品定位。",
       icon: <div className="text-4xl font-bold text-orange-500">133</div>,
       color: "bg-orange-50"
     }

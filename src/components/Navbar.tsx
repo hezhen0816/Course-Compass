@@ -5,13 +5,22 @@ import { supabase } from '../supabase';
 interface NavbarProps {
   userEmail: string;
   syncStatus: 'idle' | 'saving' | 'saved' | 'error';
+  isDemoMode: boolean;
   onOpenSettings: () => void;
   onImport: (html: string) => void;
-  onReset: () => void;
   onOpenHelp: () => void;
+  onExitDemo: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ userEmail, syncStatus, onOpenSettings, onImport, onOpenHelp }) => {
+export const Navbar: React.FC<NavbarProps> = ({
+  userEmail,
+  syncStatus,
+  isDemoMode,
+  onOpenSettings,
+  onImport,
+  onOpenHelp,
+  onExitDemo,
+}) => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -26,15 +35,18 @@ export const Navbar: React.FC<NavbarProps> = ({ userEmail, syncStatus, onOpenSet
   };
 
   const handleLogout = async () => {
-    if (!supabase) return;
+    if (isDemoMode || !supabase) {
+      onExitDemo();
+      return;
+    }
+
     await supabase.auth.signOut();
-    // onReset(); // 移除這行，不要觸發重置警告
-    window.location.reload(); // 直接重新整理頁面，App 會自動回到登入畫面
+    window.location.reload();
   };
 
   return (
     <nav
-      className="bg-white/95 backdrop-blur sticky top-0 z-20 border-b border-slate-200 shadow-sm"
+      className="sticky top-0 z-20 border-b border-slate-200 bg-white/92 shadow-sm backdrop-blur"
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-0">
@@ -42,15 +54,29 @@ export const Navbar: React.FC<NavbarProps> = ({ userEmail, syncStatus, onOpenSet
           <div className="min-w-0 flex items-center gap-3">
             <GraduationCap className="w-7 h-7 sm:w-8 sm:h-8 text-blue-600 flex-shrink-0" />
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-lg sm:text-xl font-bold text-gray-900 truncate">修課規劃助手</span>
-                {syncStatus === 'saving' && <span className="text-xs text-gray-400 hidden sm:inline">儲存中...</span>}
-                {syncStatus === 'saved' && <span className="text-xs text-green-500 hidden sm:inline">已儲存</span>}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-blue-700">
+                  Web
+                </span>
+                {isDemoMode && (
+                  <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-700">
+                    Demo
+                  </span>
+                )}
+                {syncStatus === 'saving' && <span className="text-xs text-gray-400 hidden sm:inline">同步中...</span>}
+                {syncStatus === 'saved' && <span className="text-xs text-green-500 hidden sm:inline">已同步</span>}
               </div>
-              <div className="flex items-center gap-2 sm:hidden">
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-lg sm:text-xl font-bold text-gray-900 truncate">修課規劃助手</span>
+              </div>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                <span className="text-xs text-slate-500">網頁版專注課程規劃與學分管理</span>
+                <span className="hidden text-[11px] text-slate-400 sm:inline">課表、待辦與提醒保留在 iOS App</span>
+              </div>
+              <div className="mt-1 flex items-center gap-2 sm:hidden">
                 <span className="text-xs text-slate-500 truncate">{userEmail}</span>
-                {syncStatus === 'saving' && <span className="text-[11px] text-gray-400">儲存中...</span>}
-                {syncStatus === 'saved' && <span className="text-[11px] text-green-500">已儲存</span>}
+                {syncStatus === 'saving' && <span className="text-[11px] text-gray-400">同步中...</span>}
+                {syncStatus === 'saved' && <span className="text-[11px] text-green-500">已同步</span>}
               </div>
             </div>
           </div>
@@ -61,18 +87,18 @@ export const Navbar: React.FC<NavbarProps> = ({ userEmail, syncStatus, onOpenSet
               <button
                 onClick={onOpenSettings}
                 className="flex items-center justify-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                title="設定門檻"
+                title="設定畢業門檻"
               >
                 <Settings className="w-4 h-4" />
-                <span className="hidden md:inline">設定門檻</span>
+                <span className="hidden md:inline">門檻</span>
               </button>
 
               <label
                 className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors cursor-pointer"
-                title="匯入成績"
+                title="匯入課程資料"
               >
                 <Upload className="w-4 h-4" />
-                <span className="hidden md:inline">匯入成績</span>
+                <span className="hidden md:inline">匯入</span>
                 <input
                   type="file"
                   accept=".html"
@@ -100,10 +126,10 @@ export const Navbar: React.FC<NavbarProps> = ({ userEmail, syncStatus, onOpenSet
               <button
                 onClick={handleLogout}
                 className="flex items-center justify-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                title="登出"
+                title={isDemoMode ? '離開展示' : '登出'}
               >
                 <LogOut className="w-4 h-4" />
-                <span className="hidden md:inline">登出</span>
+                <span className="hidden md:inline">{isDemoMode ? '離開展示' : '登出'}</span>
               </button>
             </div>
           </div>

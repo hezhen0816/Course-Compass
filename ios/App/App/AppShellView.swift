@@ -38,6 +38,22 @@ struct AppShellView: View {
             .tag(AppTab.settings)
         }
         .tint(.indigo)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.footnote.weight(.bold))
+                Text("展示版：目前修改只保留本次開啟")
+                    .font(.footnote.weight(.semibold))
+                Spacer()
+            }
+            .foregroundStyle(.indigo)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .bottom) {
+                Divider()
+            }
+        }
         .environmentObject(store)
     }
 }

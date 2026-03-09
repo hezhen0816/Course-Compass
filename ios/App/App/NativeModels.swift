@@ -61,6 +61,21 @@ enum Weekday: String, CaseIterable, Identifiable {
         "星期\(shortTitle)"
     }
 
+    var calendarWeekday: Int {
+        switch self {
+        case .monday:
+            return 2
+        case .tuesday:
+            return 3
+        case .wednesday:
+            return 4
+        case .thursday:
+            return 5
+        case .friday:
+            return 6
+        }
+    }
+
     static func currentWeekday(from date: Date = Date()) -> Weekday {
         let weekday = Calendar.current.component(.weekday, from: date)
         switch weekday {
@@ -201,6 +216,17 @@ struct UpcomingCourse: Identifiable {
     let room: String
     let weekday: Weekday
     let note: String
+
+    var startTime: DateComponents {
+        let label = timeLabel
+            .components(separatedBy: "-")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "09:00"
+        let parts = label.split(separator: ":")
+        let hour = Int(parts.first ?? "9") ?? 9
+        let minute = Int(parts.dropFirst().first ?? "0") ?? 0
+        return DateComponents(hour: hour, minute: minute)
+    }
 }
 
 struct TodoItem: Identifiable {
