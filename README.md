@@ -23,5 +23,21 @@
 2.  **匯入成績**：登入學校成績查詢系統，將頁面存為 `.html`，點擊右上角「匯入成績」即可。
 3.  **規劃課程**：點擊「+」新增下學期課程，或點擊課程卡片上的「ℹ️」進行成績試算。
 
+## 📱 iOS 封裝
+
+專案已接上 Capacitor，可包成 iOS App。
+
+1.  **同步 Web 到 iOS 專案**：執行 `npm run ios:sync`
+2.  **開啟 Xcode**：執行 `npm run ios:open`
+3.  **首次使用前置條件**：
+    需要安裝完整 Xcode，不只 Command Line Tools。
+4.  **如果 `xcodebuild` 找不到 Xcode**：
+    執行 `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
+5.  **目前 iOS 專案路徑**：
+    `ios/App/App.xcodeproj`
+
+注意：
+目前功能邏輯可直接沿用，但 `.html` 匯入流程仍需在實機或模擬器上額外驗證檔案挑選體驗。
+
 ---
 *Developed by Hezhen*

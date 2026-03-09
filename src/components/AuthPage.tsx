@@ -32,7 +32,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onDemoLogin }) => {
 
   if (!supabase) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div
+        className="min-h-screen flex items-center justify-center bg-gray-50 px-4"
+        style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+      >
         <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
           <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
           <h1 className="text-xl font-bold text-gray-900 mb-2">尚未設定 Supabase</h1>
@@ -45,7 +48,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onDemoLogin }) => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div
+      className="min-h-screen flex items-center justify-center bg-gray-50 px-4"
+      style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+    >
       <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
         <div className="text-center mb-8">
           <GraduationCap className="w-12 h-12 text-blue-600 mx-auto mb-4" />
