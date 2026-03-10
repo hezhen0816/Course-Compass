@@ -14,9 +14,19 @@ struct ScheduleView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("本週課表")
                         .font(.title3.weight(.bold))
-                    Text("以單日時間軸呈現，保留 iPhone 直向閱讀節奏。")
+                    Text(store.lastSyncedAt == nil ? "以單日時間軸呈現，保留 iPhone 直向閱讀節奏。" : "已改為顯示後端同步後的最新課表快照。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    if case .failed(let message) = store.syncState {
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    } else if let lastSyncedAt = store.lastSyncedAt {
+                        Label("上次同步 \(formatted(lastSyncedAt))", systemImage: "clock.arrow.circlepath")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Picker("星期", selection: $selectedWeekday) {
                         ForEach(Weekday.allCases) { weekday in
@@ -79,5 +89,12 @@ struct ScheduleView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("課表")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    private func formatted(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter.string(from: date)
     }
 }

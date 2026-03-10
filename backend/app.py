@@ -1,0 +1,568 @@
+from __future__ import annotations
+
+import os
+import re
+from datetime import datetime
+from typing import Any
+from urllib.parse import quote, urljoin
+from zoneinfo import ZoneInfo
+
+import requests
+import urllib3
+from bs4 import BeautifulSoup, Tag
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+
+
+TAIPEI = ZoneInfo("Asia/Taipei")
+BASE_URL = "https://courseselection.ntust.edu.tw"
+ENTRY_URL = f"{BASE_URL}/"
+VERIFY_URL = f"{BASE_URL}/First/A06/A06"
+COURSE_LIST_URL = f"{BASE_URL}/ChooseList/D01/D01"
+DEFAULT_TIMEOUT = 30
+DEFAULT_VERIFY_SSL = os.environ.get("NTUST_VERIFY_SSL", "false").lower() in {"true", "1", "yes"}
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+app = FastAPI(title="Course Planner Sync API", version="0.1.0")
+
+
+class SyncRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    profile_key: str | None = None
+    persist_to_supabase: bool = True
+    verify_ssl: bool = DEFAULT_VERIFY_SSL
+
+
+class CourseRow(BaseModel):
+    course_code: str
+    course_name: str
+    credits: float | str
+    required_type: str
+    professor: str
+    note: str
+
+
+class ScheduleSlot(BaseModel):
+    weekday_key: str
+    weekday_label: str
+    period: str
+    time: str
+    course_name: str
+    location: str
+    raw: str
+
+
+class ScheduleEntryPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    weekday_key: str
+    weekday_label: str
+    title: str
+    time_range: str
+    room: str
+    instructor: str
+    accent: str
+
+
+class SyncResponse(BaseModel):
+    profile_key: str
+    school_account: str
+    student_name: str | None = None
+    source_url: str
+    page_title: str
+    total_credits_text: str
+    total_credits: float | None
+    synced_at: datetime
+    course_count: int
+    scheduled_slot_count: int
+    schedule_entry_count: int
+    persisted_to_supabase: bool
+    courses: list[CourseRow]
+    slots: list[ScheduleSlot]
+    schedule_entries: list[ScheduleEntryPayload]
+
+
+def now() -> datetime:
+    return datetime.now(TAIPEI)
+
+
+def normalize(text: str | None) -> str:
+    return (text or "").replace("\xa0", " ").replace("\r", "").strip()
+
+
+def split_lines(text: str | None) -> list[str]:
+    return [line.strip() for line in normalize(text).split("\n") if line.strip()]
+
+
+def first_form(soup: BeautifulSoup) -> Tag:
+    form = soup.find("form")
+    if not isinstance(form, Tag):
+        raise RuntimeError("無法找到表單。")
+    return form
+
+
+def parse_hidden_inputs(form: Tag) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for input_tag in form.find_all("input"):
+        if not isinstance(input_tag, Tag):
+            continue
+        name = input_tag.get("name")
+        if not name:
+            continue
+        input_type = (input_tag.get("type") or "").lower()
+        if input_type in {"hidden", ""}:
+            values[name] = input_tag.get("value", "")
+    return values
+
+
+def find_error_text(soup: BeautifulSoup) -> str | None:
+    containers = soup.find_all(
+        ["div", "span", "p"],
+        class_=re.compile(r"error|alert|warning|danger|validation", re.I),
+    )
+    for container in containers:
+        text = normalize(container.get_text(" ", strip=True))
+        if text:
+            return text
+
+    for node in soup.find_all(string=re.compile("帳號或密碼|incorrect|失敗|錯誤", re.I)):
+        text = normalize(str(node))
+        if text:
+            return text
+    return None
+
+
+def build_login_url(entry_response: requests.Response) -> str:
+    if "ssoam" in entry_response.url:
+        return entry_response.url
+
+    soup = BeautifulSoup(entry_response.text, "html.parser")
+    form = soup.find("form")
+    if not isinstance(form, Tag):
+        raise RuntimeError("入口頁沒有提供 SSO 登入資訊。")
+
+    action = form.get("action")
+    if action:
+        return urljoin(entry_response.url, action)
+
+    return_url_input = form.find("input", {"name": "ReturnUrl"})
+    if isinstance(return_url_input, Tag):
+        return_url = return_url_input.get("value", "")
+        if return_url:
+            return f"https://ssoam2.ntust.edu.tw/account/login?ReturnUrl={return_url}"
+
+    raise RuntimeError("無法從入口頁推導 SSO 登入網址。")
+
+
+def submit_hidden_form(
+    session: requests.Session,
+    page_response: requests.Response,
+    verify_ssl: bool,
+) -> requests.Response:
+    soup = BeautifulSoup(page_response.text, "html.parser")
+    form = first_form(soup)
+    form_data = parse_hidden_inputs(form)
+    action = urljoin(page_response.url, form.get("action", ""))
+    response = session.post(
+        action,
+        data=form_data,
+        timeout=DEFAULT_TIMEOUT,
+        allow_redirects=True,
+        verify=verify_ssl,
+    )
+    response.raise_for_status()
+    return response
+
+
+def login(session: requests.Session, username: str, password: str, verify_ssl: bool) -> None:
+    entry_response = session.get(
+        ENTRY_URL,
+        timeout=DEFAULT_TIMEOUT,
+        allow_redirects=True,
+        verify=verify_ssl,
+    )
+    entry_response.raise_for_status()
+
+    login_url = build_login_url(entry_response)
+    login_page = session.get(
+        login_url,
+        timeout=DEFAULT_TIMEOUT,
+        allow_redirects=True,
+        verify=verify_ssl,
+    )
+    login_page.raise_for_status()
+
+    soup = BeautifulSoup(login_page.text, "html.parser")
+    form = first_form(soup)
+    login_data = parse_hidden_inputs(form)
+    login_data["Username"] = username
+    login_data["Password"] = password
+    login_data.setdefault("captcha", "")
+
+    submit_url = urljoin(login_page.url, form.get("action", ""))
+    login_response = session.post(
+        submit_url,
+        data=login_data,
+        timeout=DEFAULT_TIMEOUT,
+        allow_redirects=True,
+        verify=verify_ssl,
+    )
+    login_response.raise_for_status()
+
+    if "signin-oidc" in login_response.url:
+        login_response = submit_hidden_form(session, login_response, verify_ssl)
+
+    if "login" in login_response.url.lower() and "ssoam" in login_response.url:
+        error_text = find_error_text(BeautifulSoup(login_response.text, "html.parser"))
+        if error_text:
+            raise RuntimeError(f"SSO 登入失敗：{error_text}")
+        raise RuntimeError(f"SSO 登入失敗，仍停留在登入頁：{login_response.url}")
+
+    verify_response = session.get(
+        VERIFY_URL,
+        timeout=DEFAULT_TIMEOUT,
+        allow_redirects=True,
+        verify=verify_ssl,
+    )
+    verify_response.raise_for_status()
+
+    if "signin-oidc" in verify_response.url:
+        verify_response = submit_hidden_form(session, verify_response, verify_ssl)
+
+    if "login" in verify_response.url.lower() or "ssoam" in verify_response.url:
+        raise RuntimeError(f"登入後驗證失敗，目前停在 {verify_response.url}")
+
+
+def locate_course_table(print_area: Tag) -> Tag:
+    for table in print_area.find_all("table"):
+        header_row = table.find("tr")
+        header_text = normalize(header_row.get_text(" ", strip=True) if header_row else "")
+        if (
+            "課碼" in header_text
+            and "課程名稱" in header_text
+            and "學分數" in header_text
+            and "上課教師" in header_text
+        ):
+            return table
+    raise RuntimeError("找不到課程清單表格。")
+
+
+def locate_schedule_table(print_area: Tag) -> Tag:
+    for table in print_area.find_all("table"):
+        header_row = table.find("tr")
+        header_text = normalize(header_row.get_text(" ", strip=True) if header_row else "")
+        if "節次" in header_text and "星期一" in header_text and "星期日" in header_text:
+            return table
+    raise RuntimeError("找不到課表表格。")
+
+
+def parse_course_rows(table: Tag) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for tr in table.find_all("tr")[1:]:
+        cells = [normalize(td.get_text(" ", strip=True)) for td in tr.find_all("td")]
+        if len(cells) < 6 or not cells[0] or not cells[1]:
+            continue
+        rows.append(
+            {
+                "course_code": cells[0],
+                "course_name": cells[1],
+                "credits": float(cells[2]) if re.fullmatch(r"\d+(?:\.\d+)?", cells[2]) else cells[2],
+                "required_type": cells[3],
+                "professor": cells[4],
+                "note": cells[5],
+            }
+        )
+    return rows
+
+
+def weekday_key_from_label(label: str) -> str:
+    mapping = {
+        "星期一": "monday",
+        "星期二": "tuesday",
+        "星期三": "wednesday",
+        "星期四": "thursday",
+        "星期五": "friday",
+        "星期六": "saturday",
+        "星期日": "sunday",
+    }
+    return mapping.get(label, "monday")
+
+
+def parse_schedule_rows(table: Tag) -> list[dict[str, Any]]:
+    tr_rows = table.find_all("tr")
+    if len(tr_rows) < 2:
+        return []
+
+    header_cells = [normalize(cell.get_text(" ", strip=True)) for cell in tr_rows[0].find_all(["th", "td"])]
+    weekdays = header_cells[2:]
+    slot_rows: list[dict[str, Any]] = []
+
+    for tr in tr_rows[1:]:
+        cells = [split_lines(td.get_text("\n", strip=True)) for td in tr.find_all("td")]
+        if len(cells) < 2 + len(weekdays):
+            continue
+
+        period = " ".join(cells[0])
+        time_text = " ".join(cells[1])
+        for index, weekday in enumerate(weekdays):
+            lines = cells[index + 2]
+            if not lines:
+                continue
+            slot_rows.append(
+                {
+                    "weekday_key": weekday_key_from_label(weekday),
+                    "weekday_label": weekday,
+                    "period": period,
+                    "time": time_text,
+                    "course_name": " / ".join(lines[:-1]) if len(lines) > 1 else lines[0],
+                    "location": lines[-1] if len(lines) > 1 else "",
+                    "raw": " | ".join(lines),
+                }
+            )
+    return slot_rows
+
+
+def parse_course_list(html: str) -> dict[str, Any]:
+    soup = BeautifulSoup(html, "html.parser")
+    print_area = soup.select_one("#PrintArea")
+    if not isinstance(print_area, Tag):
+        raise RuntimeError("找不到 #PrintArea。")
+
+    total_credits_text = ""
+    for element in print_area.find_all(True):
+        text = normalize(element.get_text(" ", strip=True))
+        if text.startswith("總學分數:"):
+            total_credits_text = text
+            break
+
+    course_rows = parse_course_rows(locate_course_table(print_area))
+    slot_rows = parse_schedule_rows(locate_schedule_table(print_area))
+
+    return {
+        "page_title": normalize(soup.title.get_text(" ", strip=True) if soup.title else ""),
+        "total_credits_text": total_credits_text,
+        "courses": course_rows,
+        "slots": slot_rows,
+    }
+
+
+def group_schedule_entries(courses: list[dict[str, Any]], slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    course_index = {course["course_name"]: course for course in courses}
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+    for slot in slots:
+        grouped.setdefault((slot["weekday_key"], slot["course_name"]), []).append(slot)
+
+    entries: list[dict[str, Any]] = []
+    for (weekday_key, course_name), group in grouped.items():
+        ordered = sorted(group, key=lambda item: _time_sort_key(item["time"]))
+        first_slot = ordered[0]
+        last_slot = ordered[-1]
+        course = course_index.get(course_name, {})
+        start = _normalize_time_segment(first_slot["time"], True)
+        end = _normalize_time_segment(last_slot["time"], False)
+        entries.append(
+            {
+                "weekday_key": weekday_key,
+                "weekday_label": first_slot["weekday_label"],
+                "title": course_name,
+                "time_range": f"{start} - {end}",
+                "room": first_slot["location"],
+                "instructor": str(course.get("professor", "")),
+                "accent": accent_from_required_type(str(course.get("required_type", "")), course_name),
+            }
+        )
+
+    entries.sort(key=lambda item: (weekday_order(item["weekday_key"]), _time_sort_key(item["time_range"])))
+    return entries
+
+
+def _normalize_time_segment(value: str, is_start: bool) -> str:
+    pieces = re.split(r"[～-]", value)
+    raw = pieces[0] if is_start else pieces[-1]
+    raw = normalize(raw).replace(" ", "")
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not match:
+        return raw
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _time_sort_key(value: str) -> tuple[int, int]:
+    start = _normalize_time_segment(value, True)
+    match = re.fullmatch(r"(\d{2}):(\d{2})", start)
+    if not match:
+        return (99, 99)
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def weekday_order(weekday_key: str) -> int:
+    ordered = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    return ordered.index(weekday_key) if weekday_key in ordered else 99
+
+
+def accent_from_required_type(required_type: str, course_name: str) -> str:
+    if "體育" in course_name:
+        return "pe"
+    if "英文" in course_name or "英語" in course_name:
+        return "english"
+    if "通識" in course_name or course_name.startswith("GE"):
+        return "genEd"
+    if required_type == "必修":
+        return "compulsory"
+    if required_type == "選修":
+        return "elective"
+    return "unclassified"
+
+
+def fetch_schedule(username: str, password: str, verify_ssl: bool) -> dict[str, Any]:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        }
+    )
+
+    login(session, username, password, verify_ssl)
+
+    page_response = session.get(
+        COURSE_LIST_URL,
+        timeout=DEFAULT_TIMEOUT,
+        allow_redirects=True,
+        verify=verify_ssl,
+    )
+    page_response.raise_for_status()
+
+    if "signin-oidc" in page_response.url:
+        page_response = submit_hidden_form(session, page_response, verify_ssl)
+        page_response = session.get(
+            COURSE_LIST_URL,
+            timeout=DEFAULT_TIMEOUT,
+            allow_redirects=True,
+            verify=verify_ssl,
+        )
+        page_response.raise_for_status()
+
+    if "login" in page_response.url.lower() or "ssoam" in page_response.url:
+        raise RuntimeError(f"無法進入選課清單頁面，目前停在 {page_response.url}")
+
+    extracted = parse_course_list(page_response.text)
+    entries = group_schedule_entries(extracted["courses"], extracted["slots"])
+    total_credits_match = re.search(r"(\d+(?:\.\d+)?)", extracted["total_credits_text"])
+    total_credits = float(total_credits_match.group(1)) if total_credits_match else None
+
+    return {
+        "source_url": page_response.url,
+        "page_title": extracted["page_title"],
+        "total_credits_text": extracted["total_credits_text"],
+        "total_credits": total_credits,
+        "courses": extracted["courses"],
+        "slots": extracted["slots"],
+        "schedule_entries": entries,
+    }
+
+
+def persist_snapshot(profile_key: str, school_account: str, payload: dict[str, Any]) -> bool:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return False
+
+    endpoint = f"{SUPABASE_URL}/rest/v1/schedule_sync_snapshots"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    body = {
+        "profile_key": profile_key,
+        "school_account": school_account,
+        "student_name": payload.get("student_name"),
+        "payload": payload,
+        "synced_at": payload["synced_at"],
+    }
+    response = requests.post(endpoint, headers=headers, json=body, timeout=DEFAULT_TIMEOUT)
+    if response.status_code >= 300:
+        raise RuntimeError(f"Supabase 寫入失敗：{response.status_code} {response.text}")
+    return True
+
+
+def load_snapshot(profile_key: str) -> dict[str, Any] | None:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return None
+
+    endpoint = (
+        f"{SUPABASE_URL}/rest/v1/schedule_sync_snapshots"
+        f"?profile_key=eq.{quote(profile_key, safe='')}&select=payload"
+    )
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    }
+    response = requests.get(endpoint, headers=headers, timeout=DEFAULT_TIMEOUT)
+    if response.status_code >= 300:
+        raise RuntimeError(f"Supabase 讀取失敗：{response.status_code} {response.text}")
+    rows = response.json()
+    if not rows:
+        return None
+    return rows[0]["payload"]
+
+
+@app.get("/health")
+def healthcheck() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "supabase_configured": bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY),
+        "timestamp": now().isoformat(),
+    }
+
+
+@app.post("/api/schedule/sync", response_model=SyncResponse)
+def sync_schedule(request: SyncRequest) -> SyncResponse:
+    try:
+        payload = fetch_schedule(request.username, request.password, request.verify_ssl)
+        synced_at = now().isoformat()
+        response_payload = {
+            **payload,
+            "profile_key": request.profile_key or request.username,
+            "school_account": request.username,
+            "student_name": None,
+            "synced_at": synced_at,
+            "course_count": len(payload["courses"]),
+            "scheduled_slot_count": len(payload["slots"]),
+            "schedule_entry_count": len(payload["schedule_entries"]),
+            "persisted_to_supabase": False,
+        }
+        if request.persist_to_supabase:
+            response_payload["persisted_to_supabase"] = persist_snapshot(
+                profile_key=response_payload["profile_key"],
+                school_account=request.username,
+                payload=response_payload,
+            )
+        return SyncResponse.model_validate(response_payload)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"課表系統請求失敗：{exc}") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/schedule/{profile_key}", response_model=SyncResponse)
+def get_latest_schedule(profile_key: str) -> SyncResponse:
+    try:
+        payload = load_snapshot(profile_key)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Supabase 找不到此 profile 的課表快照。")
+        return SyncResponse.model_validate(payload)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

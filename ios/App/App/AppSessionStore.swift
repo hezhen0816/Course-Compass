@@ -1,22 +1,808 @@
 import SwiftUI
 
+private struct UserDataUpsertRequest: Encodable {
+    let userID: String
+    let content: CloudAppDataPayload
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case content
+        case updatedAt = "updated_at"
+    }
+}
+
 @MainActor
 final class AppSessionStore: ObservableObject {
     @Published var selectedTab: AppTab = .home
     @Published var schoolAccount: String = "B11209001"
     @Published var schoolPassword: String = "courseplanner"
+    @Published var backendBaseURL: String = "http://127.0.0.1:8000"
     @Published var reminderMinutes: Int = 10
+    @Published var syncState: ScheduleSyncState = .idle
+    @Published var lastSyncedAt: Date?
     @Published var plannerTargets: PlannerTarget = .default
     @Published var plannerSemesters: [PlannerSemester] = []
+    @Published var studentName: String = ""
+    @Published var subtitle: String = "資料展示模式"
+    @Published var upcomingCourses: [UpcomingCourse]
+    @Published var todoItems: [TodoItem]
+    @Published var scheduleEntries: [ScheduleEntry]
+    @Published var currentUserEmail: String?
+    @Published var isRestoringSession = true
+    @Published var isAuthenticating = false
+    @Published var authErrorMessage: String?
+    @Published var authNoticeMessage: String?
 
-    let studentName: String = "何哲"
-    let subtitle: String = "資料展示模式"
-    let upcomingCourses: [UpcomingCourse]
-    let todoItems: [TodoItem]
-    let scheduleEntries: [ScheduleEntry]
+    private var authSession: SupabaseStoredSession?
+    private var plannerSaveTask: Task<Void, Never>?
 
     init() {
-        self.upcomingCourses = [
+        self.upcomingCourses = Self.demoUpcomingCourses()
+        self.todoItems = Self.demoTodoItems()
+        self.scheduleEntries = Self.demoScheduleEntries()
+        self.plannerSemesters = Self.demoPlannerSemesters()
+
+        Task {
+            await restoreAuthSession()
+        }
+    }
+
+    var isAuthenticated: Bool {
+        authSession != nil
+    }
+
+    var isAuthConfigured: Bool {
+        supabaseURL != nil && supabaseAnonKey != nil
+    }
+
+    var nextUpcomingCourse: UpcomingCourse? {
+        todayUpcomingCourses.first
+    }
+
+    var orderedUpcomingCourses: [UpcomingCourse] {
+        let referenceDate = Date()
+        return upcomingCourses.sorted {
+            nextOccurrenceDate(for: $0, from: referenceDate) < nextOccurrenceDate(for: $1, from: referenceDate)
+        }
+    }
+
+    var todayUpcomingCourses: [UpcomingCourse] {
+        let today = Weekday.currentWeekday()
+        return orderedUpcomingCourses.filter { $0.weekday == today }
+    }
+
+    var displayName: String {
+        let trimmedName = studentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            return trimmedName
+        }
+
+        if let currentUserEmail, !currentUserEmail.isEmpty {
+            return currentUserEmail
+        }
+
+        let trimmedAccount = schoolAccount.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedAccount.isEmpty {
+            return trimmedAccount
+        }
+
+        return "未設定使用者"
+    }
+
+    var plannerProgress: PlannerProgress {
+        PlannerProgress.calculate(from: plannerSemesters)
+    }
+
+    func credits(for semester: PlannerSemester) -> Double {
+        semester.courses.reduce(0) { partialResult, course in
+            if course.category == .pe {
+                return partialResult
+            }
+            return partialResult + course.credits
+        }
+    }
+
+    func addCourse(_ course: PlannerCourse, to semesterID: PlannerSemester.ID) {
+        guard let index = plannerSemesters.firstIndex(where: { $0.id == semesterID }) else {
+            return
+        }
+        plannerSemesters[index].courses.append(course)
+        queuePlannerSave()
+    }
+
+    func updateCourse(_ course: PlannerCourse, in semesterID: PlannerSemester.ID) {
+        guard let semesterIndex = plannerSemesters.firstIndex(where: { $0.id == semesterID }) else {
+            return
+        }
+        guard let courseIndex = plannerSemesters[semesterIndex].courses.firstIndex(where: { $0.id == course.id }) else {
+            return
+        }
+        plannerSemesters[semesterIndex].courses[courseIndex] = course
+        queuePlannerSave()
+    }
+
+    func updateTargets(_ targets: PlannerTarget) {
+        plannerTargets = targets
+        queuePlannerSave()
+    }
+
+    func signIn(email: String, password: String) async {
+        guard isAuthConfigured else {
+            authErrorMessage = "尚未設定 Supabase iOS 登入參數"
+            return
+        }
+
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedEmail.isEmpty, !password.isEmpty else {
+            authErrorMessage = "請輸入 Email 與密碼"
+            return
+        }
+
+        isAuthenticating = true
+        authErrorMessage = nil
+        authNoticeMessage = nil
+
+        do {
+            let endpoint = try makeURL(path: "/auth/v1/token?grant_type=password")
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            applyAPIHeaders(to: &request)
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "email": normalizedEmail,
+                "password": password
+            ])
+
+            let payload: SupabaseAuthSessionResponse = try await performJSONRequest(request)
+            try await establishAuthenticatedSession(from: payload, fallbackEmail: normalizedEmail)
+        } catch {
+            authErrorMessage = error.localizedDescription
+        }
+
+        isAuthenticating = false
+    }
+
+    func signUp(email: String, password: String) async {
+        guard isAuthConfigured else {
+            authErrorMessage = "尚未設定 Supabase iOS 登入參數"
+            return
+        }
+
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedEmail.isEmpty, !password.isEmpty else {
+            authErrorMessage = "請輸入 Email 與密碼"
+            return
+        }
+
+        isAuthenticating = true
+        authErrorMessage = nil
+        authNoticeMessage = nil
+
+        do {
+            let endpoint = try makeURL(path: "/auth/v1/signup")
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            applyAPIHeaders(to: &request)
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "email": normalizedEmail,
+                "password": password
+            ])
+
+            let payload: SupabaseAuthSessionResponse = try await performJSONRequest(request)
+            if payload.accessToken != nil {
+                try await establishAuthenticatedSession(from: payload, fallbackEmail: normalizedEmail)
+                authNoticeMessage = "註冊成功，已直接登入"
+            } else {
+                authNoticeMessage = "註冊成功，請依 Supabase 設定完成信箱驗證後再登入"
+            }
+        } catch {
+            authErrorMessage = error.localizedDescription
+        }
+
+        isAuthenticating = false
+    }
+
+    func signOut() async {
+        plannerSaveTask?.cancel()
+
+        if let authSession {
+            do {
+                let session = try await validSession(forceRefresh: false)
+                let endpoint = try makeURL(path: "/auth/v1/logout")
+                var request = URLRequest(url: endpoint)
+                request.httpMethod = "POST"
+                applyAPIHeaders(to: &request)
+                request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+                _ = try await URLSession.shared.data(for: request)
+            } catch {
+                // Ignore remote logout failures and clear the local session anyway.
+            }
+        }
+
+        clearAuthenticatedState()
+    }
+
+    func syncSchedule() async {
+        let username = schoolAccount.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = schoolPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = normalizedBackendBaseURL
+
+        guard !username.isEmpty, !password.isEmpty else {
+            syncState = .failed("請先輸入學校帳號與密碼")
+            return
+        }
+
+        guard let endpoint = URL(string: "\(baseURL)/api/schedule/sync") else {
+            syncState = .failed("後端網址格式錯誤")
+            return
+        }
+
+        syncState = .syncing
+
+        do {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(
+                ScheduleSyncRequest(
+                    username: username,
+                    password: password,
+                    profileKey: username,
+                    persistToSupabase: true,
+                    verifySSL: false
+                )
+            )
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validateHTTPResponse(response, data: data)
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let payload = try decoder.decode(ScheduleSyncResponse.self, from: data)
+            apply(payload: payload)
+            syncState = .synced
+        } catch {
+            syncState = .failed(error.localizedDescription)
+        }
+    }
+
+    func loadLatestScheduleSnapshot() async {
+        let profileKey = schoolAccount.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = normalizedBackendBaseURL
+
+        guard !profileKey.isEmpty else {
+            syncState = .failed("缺少學號，無法讀取快照")
+            return
+        }
+
+        guard let endpoint = URL(string: "\(baseURL)/api/schedule/\(profileKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? profileKey)") else {
+            syncState = .failed("後端網址格式錯誤")
+            return
+        }
+
+        syncState = .syncing
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: endpoint)
+            try validateHTTPResponse(response, data: data)
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let payload = try decoder.decode(ScheduleSyncResponse.self, from: data)
+            apply(payload: payload)
+            syncState = .synced
+        } catch {
+            syncState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func restoreAuthSession() async {
+        guard isAuthConfigured else {
+            authErrorMessage = "尚未設定 Supabase iOS 登入參數"
+            isRestoringSession = false
+            return
+        }
+
+        defer {
+            isRestoringSession = false
+        }
+
+        guard
+            let sessionData = UserDefaults.standard.data(forKey: Self.authSessionStorageKey),
+            let storedSession = try? JSONDecoder().decode(SupabaseStoredSession.self, from: sessionData)
+        else {
+            return
+        }
+
+        authSession = storedSession
+        currentUserEmail = storedSession.email
+
+        do {
+            _ = try await validSession(forceRefresh: storedSession.expiresAt <= Date().addingTimeInterval(60))
+            await loadPlannerData()
+        } catch {
+            clearAuthenticatedState()
+            authErrorMessage = "登入已失效，請重新登入"
+        }
+    }
+
+    private func establishAuthenticatedSession(from payload: SupabaseAuthSessionResponse, fallbackEmail: String) async throws {
+        guard
+            let accessToken = payload.accessToken,
+            let refreshToken = payload.refreshToken,
+            let user = payload.user
+        else {
+            throw NSError(domain: "CoursePlannerAuth", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Supabase 沒有回傳可用的 session"
+            ])
+        }
+
+        let expiresAt: Date
+        if let epoch = payload.expiresAt {
+            expiresAt = Date(timeIntervalSince1970: epoch)
+        } else if let expiresIn = payload.expiresIn {
+            expiresAt = Date().addingTimeInterval(TimeInterval(expiresIn))
+        } else {
+            expiresAt = Date().addingTimeInterval(3600)
+        }
+
+        let storedSession = SupabaseStoredSession(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            userID: user.id,
+            email: user.email ?? fallbackEmail
+        )
+
+        authSession = storedSession
+        currentUserEmail = storedSession.email
+        authErrorMessage = nil
+        subtitle = "已登入 Supabase"
+        persistAuthSession(storedSession)
+        await loadPlannerData()
+    }
+
+    private func loadPlannerData() async {
+        guard isAuthenticated else {
+            return
+        }
+
+        do {
+            let session = try await validSession()
+            let queryUserID = session.userID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? session.userID
+            let endpoint = try makeURL(path: "/rest/v1/user_data?select=content&user_id=eq.\(queryUserID)")
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "GET"
+            applyAPIHeaders(to: &request)
+            request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validateHTTPResponse(response, data: data)
+
+            let decoder = JSONDecoder()
+            let records = try decoder.decode([CloudUserDataRecord].self, from: data)
+            if let record = records.first {
+                applyPlannerPayload(record.content)
+                authNoticeMessage = "已載入 Supabase 規劃資料"
+            } else {
+                plannerTargets = .default
+                plannerSemesters = Self.blankPlannerSemesters()
+                authNoticeMessage = "已登入 Supabase，可開始建立你的規劃"
+            }
+        } catch {
+            plannerTargets = .default
+            plannerSemesters = Self.blankPlannerSemesters()
+            authErrorMessage = "讀取 Supabase 資料失敗：\(error.localizedDescription)"
+        }
+    }
+
+    private func queuePlannerSave() {
+        guard isAuthenticated else {
+            return
+        }
+
+        plannerSaveTask?.cancel()
+        plannerSaveTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else {
+                return
+            }
+            await savePlannerData()
+        }
+    }
+
+    private func savePlannerData() async {
+        guard isAuthenticated else {
+            return
+        }
+
+        do {
+            let session = try await validSession()
+            let endpoint = try makeURL(path: "/rest/v1/user_data?on_conflict=user_id")
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+            applyAPIHeaders(to: &request)
+            request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+
+            let payload = cloudAppDataPayload()
+            let body = [
+                UserDataUpsertRequest(
+                    userID: session.userID,
+                    content: payload,
+                    updatedAt: Self.iso8601String(from: Date())
+                )
+            ]
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.withoutEscapingSlashes]
+            request.httpBody = try encoder.encode(body)
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validateHTTPResponse(response, data: data)
+            authNoticeMessage = "規劃資料已儲存到 Supabase"
+        } catch {
+            authErrorMessage = "儲存 Supabase 失敗：\(error.localizedDescription)"
+        }
+    }
+
+    private func validSession(forceRefresh: Bool = false) async throws -> SupabaseStoredSession {
+        guard let currentSession = authSession else {
+            throw NSError(domain: "CoursePlannerAuth", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "尚未登入"
+            ])
+        }
+
+        if forceRefresh || currentSession.expiresAt <= Date().addingTimeInterval(60) {
+            return try await refreshSession(using: currentSession)
+        }
+
+        return currentSession
+    }
+
+    private func refreshSession(using currentSession: SupabaseStoredSession) async throws -> SupabaseStoredSession {
+        let endpoint = try makeURL(path: "/auth/v1/token?grant_type=refresh_token")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAPIHeaders(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "refresh_token": currentSession.refreshToken
+        ])
+
+        let payload: SupabaseAuthSessionResponse = try await performJSONRequest(request)
+        guard
+            let accessToken = payload.accessToken,
+            let refreshToken = payload.refreshToken
+        else {
+            throw NSError(domain: "CoursePlannerAuth", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "無法刷新登入 session"
+            ])
+        }
+
+        let expiresAt: Date
+        if let epoch = payload.expiresAt {
+            expiresAt = Date(timeIntervalSince1970: epoch)
+        } else if let expiresIn = payload.expiresIn {
+            expiresAt = Date().addingTimeInterval(TimeInterval(expiresIn))
+        } else {
+            expiresAt = Date().addingTimeInterval(3600)
+        }
+
+        let refreshedSession = SupabaseStoredSession(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            userID: payload.user?.id ?? currentSession.userID,
+            email: payload.user?.email ?? currentSession.email
+        )
+
+        authSession = refreshedSession
+        currentUserEmail = refreshedSession.email
+        persistAuthSession(refreshedSession)
+        return refreshedSession
+    }
+
+    private func cloudAppDataPayload() -> CloudAppDataPayload {
+        CloudAppDataPayload(
+            semesters: plannerSemesters.map { semester in
+                CloudSemester(
+                    id: semester.id.uuidString,
+                    name: semester.name,
+                    courses: semester.courses.map { course in
+                        CloudCourse(
+                            id: course.id.uuidString,
+                            name: course.name,
+                            credits: course.credits,
+                            category: cloudCategory(for: course.category),
+                            program: cloudProgram(for: course.program),
+                            dimension: cloudDimension(for: course.dimension),
+                            details: CloudCourseDetails(
+                                professor: course.instructor.isEmpty ? nil : course.instructor,
+                                email: nil,
+                                location: course.location.isEmpty ? nil : course.location,
+                                time: course.time.isEmpty ? nil : course.time,
+                                link: nil,
+                                gradingPolicy: [],
+                                notes: course.notes.isEmpty ? nil : course.notes
+                            )
+                        )
+                    }
+                )
+            },
+            targets: CloudTargets(
+                total: plannerTargets.total,
+                chinese: plannerTargets.chinese,
+                english: plannerTargets.english,
+                genEd: plannerTargets.genEd,
+                peSemesters: plannerTargets.peSemesters,
+                social: plannerTargets.social,
+                homeCompulsory: plannerTargets.homeCompulsory,
+                homeElective: plannerTargets.homeElective,
+                doubleMajor: plannerTargets.doubleMajor,
+                minor: plannerTargets.minor
+            )
+        )
+    }
+
+    private func applyPlannerPayload(_ payload: CloudAppDataPayload) {
+        let targets = payload.targets
+        plannerTargets = PlannerTarget(
+            total: targets?.total ?? PlannerTarget.default.total,
+            chinese: targets?.chinese ?? PlannerTarget.default.chinese,
+            english: targets?.english ?? PlannerTarget.default.english,
+            genEd: targets?.genEd ?? PlannerTarget.default.genEd,
+            peSemesters: targets?.peSemesters ?? PlannerTarget.default.peSemesters,
+            social: targets?.social ?? PlannerTarget.default.social,
+            homeCompulsory: targets?.homeCompulsory ?? PlannerTarget.default.homeCompulsory,
+            homeElective: targets?.homeElective ?? PlannerTarget.default.homeElective,
+            doubleMajor: targets?.doubleMajor ?? PlannerTarget.default.doubleMajor,
+            minor: targets?.minor ?? PlannerTarget.default.minor
+        )
+
+        let semesters = (payload.semesters ?? []).map { semester in
+            PlannerSemester(
+                id: UUID(uuidString: semester.id) ?? UUID(),
+                name: semester.name,
+                courses: semester.courses.map { course in
+                    PlannerCourse(
+                        id: UUID(uuidString: course.id) ?? UUID(),
+                        name: course.name,
+                        credits: course.credits,
+                        category: plannerCategory(from: course.category),
+                        program: plannerProgram(from: course.program),
+                        dimension: plannerDimension(from: course.dimension),
+                        instructor: course.details?.professor ?? "",
+                        location: course.details?.location ?? "",
+                        time: course.details?.time ?? "",
+                        notes: course.details?.notes ?? ""
+                    )
+                }
+            )
+        }
+
+        plannerSemesters = semesters.isEmpty ? Self.blankPlannerSemesters() : semesters
+    }
+
+    private func apply(payload: ScheduleSyncResponse) {
+        if let payloadStudentName = payload.studentName?.trimmingCharacters(in: .whitespacesAndNewlines), !payloadStudentName.isEmpty {
+            studentName = payloadStudentName
+        }
+        subtitle = payload.persistedToSupabase ? "已同步並寫入 Supabase" : "已同步但未寫入 Supabase"
+        lastSyncedAt = payload.syncedAt
+        scheduleEntries = payload.scheduleEntries.map { entry in
+            ScheduleEntry(
+                weekday: entry.weekdayKey,
+                title: entry.title,
+                timeRange: entry.timeRange,
+                room: entry.room,
+                instructor: entry.instructor,
+                accent: mapAccent(entry.accent)
+            )
+        }
+        upcomingCourses = buildUpcomingCourses(from: scheduleEntries)
+    }
+
+    private func buildUpcomingCourses(from entries: [ScheduleEntry]) -> [UpcomingCourse] {
+        entries.map { entry in
+            UpcomingCourse(
+                title: entry.title,
+                subtitle: entry.instructor.isEmpty ? "已同步課表" : entry.instructor,
+                timeLabel: entry.timeRange,
+                room: entry.room.isEmpty ? "未提供地點" : entry.room,
+                weekday: entry.weekday,
+                note: entry.room.isEmpty ? "此課程未提供教室資訊" : "同步自校務課表"
+            )
+        }
+    }
+
+    private func mapAccent(_ rawValue: String) -> PlannerCourseCategory {
+        PlannerCourseCategory(rawValue: rawValue) ?? .unclassified
+    }
+
+    private func cloudCategory(for category: PlannerCourseCategory) -> String {
+        switch category {
+        case .genEd:
+            return "gen_ed"
+        default:
+            return category.rawValue
+        }
+    }
+
+    private func plannerCategory(from rawValue: String) -> PlannerCourseCategory {
+        switch rawValue {
+        case "gen_ed":
+            return .genEd
+        default:
+            return PlannerCourseCategory(rawValue: rawValue) ?? .unclassified
+        }
+    }
+
+    private func cloudProgram(for program: PlannerCourseProgram) -> String {
+        switch program {
+        case .doubleMajor:
+            return "double_major"
+        default:
+            return program.rawValue
+        }
+    }
+
+    private func plannerProgram(from rawValue: String?) -> PlannerCourseProgram {
+        switch rawValue {
+        case "double_major":
+            return .doubleMajor
+        case "minor":
+            return .minor
+        case "other":
+            return .other
+        default:
+            return .home
+        }
+    }
+
+    private func cloudDimension(for dimension: PlannerGenEdDimension) -> String? {
+        dimension == .none ? "None" : dimension.rawValue
+    }
+
+    private func plannerDimension(from rawValue: String?) -> PlannerGenEdDimension {
+        guard let rawValue, rawValue != "None" else {
+            return .none
+        }
+        return PlannerGenEdDimension(rawValue: rawValue) ?? .none
+    }
+
+    private func persistAuthSession(_ session: SupabaseStoredSession) {
+        if let encoded = try? JSONEncoder().encode(session) {
+            UserDefaults.standard.set(encoded, forKey: Self.authSessionStorageKey)
+        }
+    }
+
+    private func clearAuthenticatedState() {
+        authSession = nil
+        currentUserEmail = nil
+        studentName = ""
+        authErrorMessage = nil
+        authNoticeMessage = nil
+        subtitle = "資料展示模式"
+        plannerTargets = .default
+        plannerSemesters = Self.blankPlannerSemesters()
+        UserDefaults.standard.removeObject(forKey: Self.authSessionStorageKey)
+    }
+
+    private func makeURL(path: String) throws -> URL {
+        guard
+            let supabaseURL,
+            let url = URL(string: path, relativeTo: supabaseURL)
+        else {
+            throw NSError(domain: "CoursePlannerAuth", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Supabase URL 設定錯誤"
+            ])
+        }
+        return url
+    }
+
+    private func applyAPIHeaders(to request: inout URLRequest) {
+        guard let supabaseAnonKey else {
+            return
+        }
+
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+    }
+
+    private func performJSONRequest<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateHTTPResponse(response, data: data)
+
+        let decoder = JSONDecoder()
+        return try decoder.decode(T.self, from: data)
+    }
+
+    private func validateHTTPResponse(_ response: URLResponse, data: Data) throws {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        guard (200 ..< 300).contains(httpResponse.statusCode) else {
+            if
+                let authError = try? JSONDecoder().decode(SupabaseAuthErrorResponse.self, from: data),
+                let message = authError.errorDescription ?? authError.message
+            {
+                throw NSError(domain: "CoursePlannerAuth", code: httpResponse.statusCode, userInfo: [
+                    NSLocalizedDescriptionKey: message
+                ])
+            }
+
+            if
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let detail = json["detail"] as? String
+            {
+                throw NSError(domain: "CoursePlannerAuth", code: httpResponse.statusCode, userInfo: [
+                    NSLocalizedDescriptionKey: detail
+                ])
+            }
+
+            throw NSError(domain: "CoursePlannerAuth", code: httpResponse.statusCode, userInfo: [
+                NSLocalizedDescriptionKey: "請求失敗，HTTP \(httpResponse.statusCode)"
+            ])
+        }
+    }
+
+    private func nextOccurrenceDate(for course: UpcomingCourse, from referenceDate: Date) -> Date {
+        let calendar = Calendar(identifier: .gregorian)
+        var components = DateComponents()
+        components.weekday = course.weekday.calendarWeekday
+        components.hour = course.startTime.hour
+        components.minute = course.startTime.minute
+
+        return calendar.nextDate(
+            after: referenceDate.addingTimeInterval(-1),
+            matching: components,
+            matchingPolicy: .nextTimePreservingSmallerComponents,
+            direction: .forward
+        ) ?? referenceDate
+    }
+
+    private var normalizedBackendBaseURL: String {
+        backendBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private var supabaseURL: URL? {
+        guard let rawValue = Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String else {
+            return nil
+        }
+        return URL(string: rawValue)
+    }
+
+    private var supabaseAnonKey: String? {
+        Bundle.main.object(forInfoDictionaryKey: "SupabaseAnonKey") as? String
+    }
+
+    private static let authSessionStorageKey = "courseplanner.supabase.session"
+
+    private static func iso8601String(from date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private static func blankPlannerSemesters() -> [PlannerSemester] {
+        [
+            PlannerSemester(name: "大一上", courses: []),
+            PlannerSemester(name: "大一下", courses: []),
+            PlannerSemester(name: "大二上", courses: []),
+            PlannerSemester(name: "大二下", courses: []),
+            PlannerSemester(name: "大三上", courses: []),
+            PlannerSemester(name: "大三下", courses: []),
+            PlannerSemester(name: "大四上", courses: []),
+            PlannerSemester(name: "大四下", courses: [])
+        ]
+    }
+
+    private static func demoUpcomingCourses() -> [UpcomingCourse] {
+        [
             UpcomingCourse(
                 title: "人機互動設計",
                 subtitle: "今日第一堂課",
@@ -42,8 +828,10 @@ final class AppSessionStore: ObservableObject {
                 note: "10 分鐘內完成 pitch"
             )
         ]
+    }
 
-        self.todoItems = [
+    private static func demoTodoItems() -> [TodoItem] {
+        [
             TodoItem(
                 title: "完成期中簡報首頁與資訊架構圖",
                 course: "數位產品企劃",
@@ -66,8 +854,10 @@ final class AppSessionStore: ObservableObject {
                 isCompleted: true
             )
         ]
+    }
 
-        self.scheduleEntries = [
+    private static func demoScheduleEntries() -> [ScheduleEntry] {
+        [
             ScheduleEntry(weekday: .monday, title: "人機互動設計", timeRange: "09:10 - 12:00", room: "TR-512", instructor: "王怡文", accent: .compulsory),
             ScheduleEntry(weekday: .monday, title: "通識：科技與社會", timeRange: "13:20 - 15:10", room: "AU-101", instructor: "陳明志", accent: .genEd),
             ScheduleEntry(weekday: .tuesday, title: "資料庫系統", timeRange: "13:20 - 16:10", room: "RB-105", instructor: "林大鈞", accent: .compulsory),
@@ -75,8 +865,10 @@ final class AppSessionStore: ObservableObject {
             ScheduleEntry(weekday: .thursday, title: "數位產品企劃", timeRange: "10:20 - 12:10", room: "IB-302", instructor: "黃詠真", accent: .elective),
             ScheduleEntry(weekday: .friday, title: "體育：羽球", timeRange: "15:30 - 17:20", room: "體育館 B1", instructor: "張嘉宏", accent: .pe)
         ]
+    }
 
-        self.plannerSemesters = [
+    private static func demoPlannerSemesters() -> [PlannerSemester] {
+        [
             PlannerSemester(name: "大一上", courses: [
                 PlannerCourse(name: "微積分(一)", credits: 3, category: .compulsory, program: .home, instructor: "黃建豪", location: "MA-201", time: "一 1,2,3"),
                 PlannerCourse(name: "程式設計", credits: 3, category: .compulsory, program: .home, instructor: "李宜庭", location: "IB-105", time: "二 2,3,4"),
@@ -115,65 +907,5 @@ final class AppSessionStore: ObservableObject {
                 PlannerCourse(name: "通識：自然生命", credits: 2, category: .genEd, program: .home, dimension: .F, instructor: "蘇品涵", location: "AU-115", time: "二 6,7")
             ])
         ]
-    }
-
-    var nextUpcomingCourse: UpcomingCourse? {
-        orderedUpcomingCourses.first
-    }
-
-    var orderedUpcomingCourses: [UpcomingCourse] {
-        let referenceDate = Date()
-        return upcomingCourses.sorted {
-            nextOccurrenceDate(for: $0, from: referenceDate) < nextOccurrenceDate(for: $1, from: referenceDate)
-        }
-    }
-
-    var plannerProgress: PlannerProgress {
-        PlannerProgress.calculate(from: plannerSemesters)
-    }
-
-    func credits(for semester: PlannerSemester) -> Double {
-        semester.courses.reduce(0) { partialResult, course in
-            if course.category == .pe {
-                return partialResult
-            }
-            return partialResult + course.credits
-        }
-    }
-
-    func addCourse(_ course: PlannerCourse, to semesterID: PlannerSemester.ID) {
-        guard let index = plannerSemesters.firstIndex(where: { $0.id == semesterID }) else {
-            return
-        }
-        plannerSemesters[index].courses.append(course)
-    }
-
-    func updateCourse(_ course: PlannerCourse, in semesterID: PlannerSemester.ID) {
-        guard let semesterIndex = plannerSemesters.firstIndex(where: { $0.id == semesterID }) else {
-            return
-        }
-        guard let courseIndex = plannerSemesters[semesterIndex].courses.firstIndex(where: { $0.id == course.id }) else {
-            return
-        }
-        plannerSemesters[semesterIndex].courses[courseIndex] = course
-    }
-
-    func updateTargets(_ targets: PlannerTarget) {
-        plannerTargets = targets
-    }
-
-    private func nextOccurrenceDate(for course: UpcomingCourse, from referenceDate: Date) -> Date {
-        let calendar = Calendar(identifier: .gregorian)
-        var components = DateComponents()
-        components.weekday = course.weekday.calendarWeekday
-        components.hour = course.startTime.hour
-        components.minute = course.startTime.minute
-
-        return calendar.nextDate(
-            after: referenceDate.addingTimeInterval(-1),
-            matching: components,
-            matchingPolicy: .nextTimePreservingSmallerComponents,
-            direction: .forward
-        ) ?? referenceDate
     }
 }

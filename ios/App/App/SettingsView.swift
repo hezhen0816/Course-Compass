@@ -4,32 +4,73 @@ struct SettingsView: View {
     @EnvironmentObject private var store: AppSessionStore
     @State private var infoMessage: InfoMessage?
     @State private var isTargetSheetPresented = false
+    @State private var isSyncing = false
 
     var body: some View {
         Form {
+            Section("Supabase 帳號") {
+                LabeledContent("目前登入", value: store.currentUserEmail ?? "未登入")
+
+                if let authNoticeMessage = store.authNoticeMessage {
+                    Text(authNoticeMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("學校帳密設定") {
                 TextField("學號 / 校務帳號", text: $store.schoolAccount)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                 SecureField("密碼", text: $store.schoolPassword)
-                Text("僅展示原生表單外觀，這次不會傳送或驗證任何帳號資訊。")
+
+                TextField("Python 後端網址", text: $store.backendBaseURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .keyboardType(.URL)
+
+                Text("會把帳密送到你自己的 Python 後端，由後端登入校務系統並可選擇寫入 Supabase。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
             Section("同步") {
                 Button {
-                    infoMessage = InfoMessage(title: "同步課表", message: "這個版本只保留原生 UI 入口，尚未串接校務或第三方課表來源。")
+                    isSyncing = true
+                    Task {
+                        await store.syncSchedule()
+                        isSyncing = false
+                    }
                 } label: {
-                    settingsRow(title: "同步課表", subtitle: "保留功能入口", symbol: "arrow.triangle.2.circlepath")
+                    settingsRow(
+                        title: isSyncing ? "同步中..." : "同步課表",
+                        subtitle: "登入校務後寫入 Supabase 快照",
+                        symbol: "arrow.triangle.2.circlepath"
+                    )
                 }
+                .disabled(isSyncing)
 
                 Button {
-                    infoMessage = InfoMessage(title: "同步學分資訊", message: "學分與成績同步尚未實作，目前頁面資料皆為本地展示內容。")
+                    isSyncing = true
+                    Task {
+                        await store.loadLatestScheduleSnapshot()
+                        isSyncing = false
+                    }
                 } label: {
-                    settingsRow(title: "同步學分資訊", subtitle: "僅介面展示", symbol: "tray.and.arrow.down")
+                    settingsRow(title: "讀取最新快照", subtitle: "直接從 Supabase 讀取已同步課表", symbol: "tray.and.arrow.down")
                 }
                 .buttonStyle(.plain)
+                .disabled(isSyncing)
+
+                if case .failed(let message) = store.syncState {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                } else {
+                    Text(syncStatusDescription)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("提醒") {
@@ -64,19 +105,21 @@ struct SettingsView: View {
 
             Section("功能導覽") {
                 Button {
-                    infoMessage = InfoMessage(title: "功能導覽", message: "目前已提供首頁、課表、學分規劃與設定四個原生 tab，後續才會接入真實資料與同步流程。")
+                    infoMessage = InfoMessage(title: "功能導覽", message: "目前已接入 Python 後端課表同步；學分規劃與待辦仍是本地資料。")
                 } label: {
-                    settingsRow(title: "查看功能導覽", subtitle: "說明目前為 UI-only 版本", symbol: "book.closed")
+                    settingsRow(title: "查看功能導覽", subtitle: "說明哪些資料已接真實同步", symbol: "book.closed")
                 }
             }
 
             Section {
                 Button(role: .destructive) {
-                    infoMessage = InfoMessage(title: "登出", message: "此版本沒有登入流程，因此登出按鈕只保留視覺入口。")
+                    Task {
+                        await store.signOut()
+                    }
                 } label: {
                     HStack {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
-                        Text("登出")
+                        Text("登出 Supabase")
                     }
                 }
             }
@@ -118,5 +161,15 @@ struct SettingsView: View {
                 .foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
+    }
+
+    private var syncStatusDescription: String {
+        if let lastSyncedAt = store.lastSyncedAt {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "zh_Hant_TW")
+            formatter.dateFormat = "M/d HH:mm"
+            return "\(store.syncState.label)・上次同步 \(formatter.string(from: lastSyncedAt))"
+        }
+        return store.syncState.label
     }
 }

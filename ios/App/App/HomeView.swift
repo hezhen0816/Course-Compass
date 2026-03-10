@@ -34,7 +34,7 @@ struct HomeView: View {
                     Text(store.subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
-                    Text(store.studentName)
+                    Text(store.displayName)
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                     Text(formattedDate)
@@ -84,47 +84,57 @@ struct HomeView: View {
 
     private var upcomingSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionHeader(title: "即將到來的課程", subtitle: "接下來需要準備的課程與提醒")
+            sectionHeader(title: "今日課程", subtitle: "只顯示今天的課程與提醒")
 
-            ForEach(store.orderedUpcomingCourses) { course in
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text(course.weekday.fullTitle)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.indigo)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.indigo.opacity(0.12), in: Capsule())
-                        Spacer()
-                        Text(course.timeLabel)
-                            .font(.caption.weight(.medium))
+            if store.todayUpcomingCourses.isEmpty {
+                ContentUnavailableView(
+                    "今天沒有課",
+                    systemImage: "sun.max",
+                    description: Text("今天不顯示其他日期的課程。")
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.top, 12)
+            } else {
+                ForEach(store.todayUpcomingCourses) { course in
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text(course.weekday.fullTitle)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.indigo)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.indigo.opacity(0.12), in: Capsule())
+                            Spacer()
+                            Text(course.timeLabel)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(course.title)
+                            .font(.headline)
+
+                        Text(course.subtitle)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                    }
 
-                    Text(course.title)
-                        .font(.headline)
-
-                    Text(course.subtitle)
-                        .font(.subheadline)
+                        HStack(spacing: 12) {
+                            Label(course.room, systemImage: "mappin.circle")
+                            Label(course.note, systemImage: "checklist")
+                        }
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
-
-                    HStack(spacing: 12) {
-                        Label(course.room, systemImage: "mappin.circle")
-                        Label(course.note, systemImage: "checklist")
                     }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
         }
     }
 
     private var todoSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionHeader(title: "待辦作業", subtitle: "只做展示，不連動校務系統資料")
+            sectionHeader(title: "待辦作業", subtitle: "目前仍為本地資料，不隨課表同步更新")
 
             ForEach(store.todoItems) { item in
                 HStack(alignment: .top, spacing: 14) {

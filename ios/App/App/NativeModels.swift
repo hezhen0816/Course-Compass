@@ -33,12 +33,14 @@ enum AppTab: String, CaseIterable, Hashable {
     }
 }
 
-enum Weekday: String, CaseIterable, Identifiable {
+enum Weekday: String, CaseIterable, Identifiable, Codable {
     case monday
     case tuesday
     case wednesday
     case thursday
     case friday
+    case saturday
+    case sunday
 
     var id: String { rawValue }
 
@@ -54,6 +56,10 @@ enum Weekday: String, CaseIterable, Identifiable {
             return "四"
         case .friday:
             return "五"
+        case .saturday:
+            return "六"
+        case .sunday:
+            return "日"
         }
     }
 
@@ -73,6 +79,10 @@ enum Weekday: String, CaseIterable, Identifiable {
             return 5
         case .friday:
             return 6
+        case .saturday:
+            return 7
+        case .sunday:
+            return 1
         }
     }
 
@@ -89,6 +99,10 @@ enum Weekday: String, CaseIterable, Identifiable {
             return .thursday
         case 6:
             return .friday
+        case 7:
+            return .saturday
+        case 1:
+            return .sunday
         default:
             return .monday
         }
@@ -208,6 +222,49 @@ enum PlannerGenEdDimension: String, CaseIterable, Identifiable {
     }
 }
 
+enum ScheduleSyncState: Equatable {
+    case idle
+    case syncing
+    case synced
+    case failed(String)
+
+    var label: String {
+        switch self {
+        case .idle:
+            return "尚未同步"
+        case .syncing:
+            return "同步中"
+        case .synced:
+            return "已同步"
+        case .failed(let message):
+            return message
+        }
+    }
+}
+
+enum AuthFormMode {
+    case login
+    case signup
+
+    var title: String {
+        switch self {
+        case .login:
+            return "登入"
+        case .signup:
+            return "註冊"
+        }
+    }
+
+    var toggleTitle: String {
+        switch self {
+        case .login:
+            return "沒有帳號？點此註冊"
+        case .signup:
+            return "已有帳號？點此登入"
+        }
+    }
+}
+
 struct UpcomingCourse: Identifiable {
     let id = UUID()
     let title: String
@@ -246,6 +303,218 @@ struct ScheduleEntry: Identifiable {
     let room: String
     let instructor: String
     let accent: PlannerCourseCategory
+}
+
+struct ScheduleSyncRequest: Encodable {
+    let username: String
+    let password: String
+    let profileKey: String
+    let persistToSupabase: Bool
+    let verifySSL: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case username
+        case password
+        case profileKey = "profile_key"
+        case persistToSupabase = "persist_to_supabase"
+        case verifySSL = "verify_ssl"
+    }
+}
+
+struct ScheduleSyncResponse: Decodable {
+    let profileKey: String
+    let schoolAccount: String
+    let studentName: String?
+    let sourceURL: String
+    let pageTitle: String
+    let totalCreditsText: String
+    let totalCredits: Double?
+    let syncedAt: Date
+    let courseCount: Int
+    let scheduledSlotCount: Int
+    let scheduleEntryCount: Int
+    let persistedToSupabase: Bool
+    let courses: [RemoteCourse]
+    let scheduleEntries: [RemoteScheduleEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case profileKey = "profile_key"
+        case schoolAccount = "school_account"
+        case studentName = "student_name"
+        case sourceURL = "source_url"
+        case pageTitle = "page_title"
+        case totalCreditsText = "total_credits_text"
+        case totalCredits = "total_credits"
+        case syncedAt = "synced_at"
+        case courseCount = "course_count"
+        case scheduledSlotCount = "scheduled_slot_count"
+        case scheduleEntryCount = "schedule_entry_count"
+        case persistedToSupabase = "persisted_to_supabase"
+        case courses
+        case scheduleEntries = "schedule_entries"
+    }
+}
+
+struct RemoteCourse: Decodable {
+    let courseCode: String
+    let courseName: String
+    let credits: Double?
+    let requiredType: String
+    let professor: String
+    let note: String
+
+    enum CodingKeys: String, CodingKey {
+        case courseCode = "course_code"
+        case courseName = "course_name"
+        case credits
+        case requiredType = "required_type"
+        case professor
+        case note
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        courseCode = try container.decode(String.self, forKey: .courseCode)
+        courseName = try container.decode(String.self, forKey: .courseName)
+        requiredType = try container.decode(String.self, forKey: .requiredType)
+        professor = try container.decode(String.self, forKey: .professor)
+        note = try container.decode(String.self, forKey: .note)
+
+        if let number = try? container.decode(Double.self, forKey: .credits) {
+            credits = number
+        } else if let text = try? container.decode(String.self, forKey: .credits) {
+            credits = Double(text)
+        } else {
+            credits = nil
+        }
+    }
+}
+
+struct RemoteScheduleEntry: Decodable {
+    let weekdayKey: Weekday
+    let title: String
+    let timeRange: String
+    let room: String
+    let instructor: String
+    let accent: String
+
+    enum CodingKeys: String, CodingKey {
+        case weekdayKey = "weekday_key"
+        case title
+        case timeRange = "time_range"
+        case room
+        case instructor
+        case accent
+    }
+}
+
+struct SupabaseAuthUser: Codable {
+    let id: String
+    let email: String?
+}
+
+struct SupabaseAuthSessionResponse: Decodable {
+    let accessToken: String?
+    let refreshToken: String?
+    let expiresAt: TimeInterval?
+    let expiresIn: Int?
+    let tokenType: String?
+    let user: SupabaseAuthUser?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case expiresAt = "expires_at"
+        case expiresIn = "expires_in"
+        case tokenType = "token_type"
+        case user
+    }
+}
+
+struct SupabaseStoredSession: Codable {
+    let accessToken: String
+    let refreshToken: String
+    let expiresAt: Date
+    let userID: String
+    let email: String?
+}
+
+struct SupabaseAuthErrorResponse: Decodable {
+    let errorDescription: String?
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case errorDescription = "error_description"
+        case message
+    }
+}
+
+struct CloudAppDataPayload: Codable {
+    let semesters: [CloudSemester]?
+    let targets: CloudTargets?
+}
+
+struct CloudSemester: Codable {
+    let id: String
+    let name: String
+    let courses: [CloudCourse]
+}
+
+struct CloudCourse: Codable {
+    let id: String
+    let name: String
+    let credits: Double
+    let category: String
+    let program: String?
+    let dimension: String?
+    let details: CloudCourseDetails?
+}
+
+struct CloudCourseDetails: Codable {
+    let professor: String?
+    let email: String?
+    let location: String?
+    let time: String?
+    let link: String?
+    let gradingPolicy: [CloudGradingItem]
+    let notes: String?
+}
+
+struct CloudGradingItem: Codable {
+    let id: String
+    let name: String
+    let weight: Double
+    let score: Double?
+}
+
+struct CloudTargets: Codable {
+    let total: Double
+    let chinese: Double
+    let english: Double
+    let genEd: Double
+    let peSemesters: Double
+    let social: Double
+    let homeCompulsory: Double
+    let homeElective: Double
+    let doubleMajor: Double
+    let minor: Double
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case chinese
+        case english
+        case genEd = "gen_ed"
+        case peSemesters = "pe_semesters"
+        case social
+        case homeCompulsory = "home_compulsory"
+        case homeElective = "home_elective"
+        case doubleMajor = "double_major"
+        case minor
+    }
+}
+
+struct CloudUserDataRecord: Decodable {
+    let content: CloudAppDataPayload
 }
 
 struct PlannerCourse: Identifiable, Equatable {
