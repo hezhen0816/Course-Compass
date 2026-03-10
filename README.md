@@ -1,43 +1,111 @@
-# 🎓 修課規劃助手 (Course Planning Assistant)
+# 修課羅盤 Workspace
 
-專為臺科大學生設計的現代化課程規劃與學分管理工具，幫助您輕鬆掌握畢業進度。
+這個 repo 明確分成兩條產品線與三個共享支援區：
 
-## ✨ 主要功能
+- `web/`：React + Vite 的課程與學分規劃 Web 版
+- `ios/`：SwiftUI 原生 iPhone App
+- `backend/`：Python 同步服務
+- `supabase/`：migration 與資料庫結構
+- `test_artifacts/`：測試素材與校務頁面樣本
 
-*   **📊 智慧儀表板**：自動統計系必修、選修、通識（含向度）、體育等各類學分，距離畢業門檻一目了然。
-*   **🚀 一鍵匯入**：支援直接匯入學校成績查詢系統的網頁檔 (`.html`)，秒速同步歷年成績，免去手動輸入。
-*   **🧮 成績試算機**：每門課皆可獨立設定評分項目（期中、期末、作業）與權重，自動預測學期成績與 GPA。
-*   **📝 生存筆記**：記錄課程評價、教授風格與考試重點，建立專屬於你的修課攻略。
-*   **☁️ 雲端同步**：支援 Supabase 帳號登入，資料自動備份於雲端；亦提供「功能演示」供快速試用（資料不儲存）。
+`backend/`、`supabase/`、`test_artifacts/` 都維持在根目錄，方便兩端共用。
 
-## 🛠️ 技術架構
+## 目錄角色
 
-*   **前端核心**: React 19, TypeScript, Vite
-*   **介面設計**: Tailwind CSS, Lucide Icons
-*   **後端服務**: Supabase (Authentication, PostgreSQL)
-*   **部署平台**: Vercel
+### Web
 
-## 🚀 快速開始
+- 專注在大螢幕操作最有價值的流程
+- 提供課程規劃、HTML 匯入、學分門檻設定、課程細節與成績試算
+- 使用雲端帳號保存 `public.user_data`
 
-1.  **登入/試用**：選擇註冊帳號以保存資料，或使用功能演示體驗。
-2.  **匯入成績**：登入學校成績查詢系統，將頁面存為 `.html`，點擊右上角「匯入成績」即可。
-3.  **規劃課程**：點擊「+」新增下學期課程，或點擊課程卡片上的「ℹ️」進行成績試算。
+詳細說明在 [web/README.md](/Users/hezhen/Project/course_planner/web/README.md)。
 
-## 📱 iOS 封裝
+### iOS
 
-專案已接上 Capacitor，可包成 iOS App。
+- 原生 SwiftUI App
+- 提供首頁摘要、每週課表、手機版學分規劃與設定
+- 額外串接同步服務，從校務系統抓課表與歷史修課紀錄
 
-1.  **同步 Web 到 iOS 專案**：執行 `npm run ios:sync`
-2.  **開啟 Xcode**：執行 `npm run ios:open`
-3.  **首次使用前置條件**：
-    需要安裝完整 Xcode，不只 Command Line Tools。
-4.  **如果 `xcodebuild` 找不到 Xcode**：
-    執行 `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
-5.  **目前 iOS 專案路徑**：
-    `ios/App/App.xcodeproj`
+詳細說明在 [ios/README.md](/Users/hezhen/Project/course_planner/ios/README.md)。
 
-注意：
-目前功能邏輯可直接沿用，但 `.html` 匯入流程仍需在實機或模擬器上額外驗證檔案挑選體驗。
+### Backend
 
----
-*Developed by Hezhen*
+- `FastAPI` 提供課表同步與歷史修課匯入 API
+- 以校務帳密登入校務系統抓資料
+- 將同步結果寫入 `schedule_sync_snapshots` 與 `history_import_snapshots`
+
+### Supabase
+
+- Web 與 iOS 共用同一個 Supabase 專案
+- 學分規劃存於 `public.user_data`
+- iOS 額外的同步快照由後端寫入
+- `user_data.content.settings` 目前使用的欄位鍵：
+  - `school_account`
+  - `school_password`
+  - `reminder_minutes`
+
+### Test Artifacts
+
+- `test_artifacts/course_selection/`：課表與選課頁樣本
+- `test_artifacts/edu_need_history/`：歷史修課紀錄頁樣本
+
+## 開發指令
+
+### 根目錄總控
+
+```bash
+npm run web:dev
+npm run web:build
+npm run web:lint
+npm run ios:open
+npm run ios:build
+npm run backend:dev
+```
+
+### Web 安裝
+
+```bash
+cd /Users/hezhen/Project/course_planner/web
+npm install
+```
+
+Web 會從 repo 根目錄讀取 `.env`，不需要另外複製一份到 `web/`。
+
+### Backend 安裝
+
+```bash
+cd /Users/hezhen/Project/course_planner
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+cp .env.example .env
+```
+
+需要的環境變數：
+
+```bash
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+NTUST_VERIFY_SSL=false
+```
+
+說明：
+
+- `VITE_SUPABASE_*` 給 Web 前端使用
+- `SUPABASE_SERVICE_ROLE_KEY` 只給 Python 後端使用
+- iOS 不應直接持有 `service_role`
+
+資料表與快照 schema 在 [backend/supabase_schema.sql](/Users/hezhen/Project/course_planner/backend/supabase_schema.sql)，migration 在 [supabase/migrations](/Users/hezhen/Project/course_planner/supabase/migrations)。
+
+## API
+
+- `POST /api/schedule/sync`：同步校務課表並保存快照
+- `GET /api/schedule/{profile_key}`：讀取最新課表快照
+- `POST /api/history/import`：匯入歷史修課紀錄並保存快照
+
+## 維護原則
+
+1. Web 與 iOS 不共用畫面與互動流程，只共用資料規則。
+2. `backend/`、`supabase/`、`test_artifacts/` 維持根目錄，作為共享基礎設施。
+3. 新功能優先先判斷屬於 Web 還是 iOS，再決定落點。
