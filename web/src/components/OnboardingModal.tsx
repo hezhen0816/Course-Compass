@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Upload, Calculator, LayoutDashboard, ChevronRight, ChevronLeft, Check, Smartphone } from 'lucide-react';
+import { X, Upload, Calculator, LayoutDashboard, ChevronRight, ChevronLeft, Check } from 'lucide-react';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -13,27 +13,27 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
 
   const steps = [
     {
-      title: "歡迎使用 Web 課程規劃版",
-      description: "這個版本專注在桌面上的課程編排、學分統計與畢業門檻管理，保留最適合大螢幕操作的規劃流程。",
+      title: "歡迎使用修課規劃助手",
+      description: "這是一個幫助你規劃大學修課路徑的工具。透過視覺化介面，你可以輕鬆管理未來的課程安排。",
       icon: <LayoutDashboard className="w-16 h-16 text-blue-500" />,
       color: "bg-blue-50"
     },
     {
       title: "快速匯入課程",
-      description: "支援成績查詢系統與選課清單兩種 HTML 匯入來源。下載校務頁面後，直接上傳到 Web 版即可補齊規劃資料。",
+      description: "使用「匯入成績」功能，上傳從學校系統下載的 HTML 檔案，工具會自動解析並填入你已修習的課程。",
       icon: <Upload className="w-16 h-16 text-green-500" />,
       color: "bg-green-50"
     },
     {
-      title: "課程細節仍留在 Web",
-      description: "課程卡片內仍可編輯詳細資訊、評分項目與筆記。這些互動維持在 Web，避免手機上塞進太多密集編修流程。",
+      title: "靈活管理課程",
+      description: "你可以手動新增、編輯、刪除課程，調整課程類別與學分，讓規劃更符合自己的需求。",
       icon: <Calculator className="w-16 h-16 text-purple-500" />,
       color: "bg-purple-50"
     },
     {
-      title: "與 iOS 版分工",
-      description: "首頁摘要、課表、待辦與提醒將交給原生 iOS App。這樣 Web 與 iOS 可以並行保留，但各自維持清楚的產品定位。",
-      icon: <Smartphone className="w-16 h-16 text-orange-500" />,
+      title: "畢業門檻追蹤",
+      description: "側邊欄會即時顯示你的學分統計與各項畢業門檻進度，幫助你掌握修課狀況。",
+      icon: <div className="text-5xl font-bold text-orange-500">133</div>,
       color: "bg-orange-50"
     }
   ];

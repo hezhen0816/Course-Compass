@@ -42,7 +42,6 @@
 - `user_data.content.settings` 目前使用的欄位鍵：
   - `school_account`
   - `school_password`
-  - `backend_base_url`
   - `reminder_minutes`
 
 ### Test Artifacts

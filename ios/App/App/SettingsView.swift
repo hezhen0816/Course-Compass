@@ -48,12 +48,7 @@ struct SettingsView: View {
                         .autocorrectionDisabled(true)
                     SecureField("密碼", text: $store.schoolPassword)
 
-                    TextField("同步服務網址", text: $store.backendBaseURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
-                        .keyboardType(.URL)
-
-                    Text("更新課表或修課紀錄時，會透過你的同步服務登入校務系統，再把資料整理回這個 App。")
+                    Text("更新課表或修課紀錄時，會透過修課羅盤的同步服務登入校務系統，再把資料整理回這個 App。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

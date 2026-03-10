@@ -31,5 +31,4 @@ npm run ios:build
 ## 注意事項
 
 - `school_password` 目前依產品需求保存在 `user_data.content.settings`
-- 課表同步服務網址預設為 `http://127.0.0.1:8000`
-- 真機測試時需改成 Mac 的區網 IP
+- iOS 端已固定使用 Railway 上的同步服務，不需要手動輸入 IP

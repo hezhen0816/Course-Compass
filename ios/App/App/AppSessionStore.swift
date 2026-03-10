@@ -27,12 +27,6 @@ final class AppSessionStore: ObservableObject {
             queuePlannerSave()
         }
     }
-    @Published var backendBaseURL: String = "http://127.0.0.1:8000" {
-        didSet {
-            guard !isRestoringPersistedState else { return }
-            queuePlannerSave()
-        }
-    }
     @Published var reminderMinutes: Int = 10 {
         didSet {
             guard !isRestoringPersistedState else { return }
@@ -261,17 +255,12 @@ final class AppSessionStore: ObservableObject {
     func syncSchedule() async {
         let username = schoolAccount.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = schoolPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = normalizedBackendBaseURL
-
         guard !username.isEmpty, !password.isEmpty else {
             syncState = .failed("請先輸入學校帳號與密碼")
             return
         }
 
-        guard let endpoint = URL(string: "\(baseURL)/api/schedule/sync") else {
-            syncState = .failed("後端網址格式錯誤")
-            return
-        }
+        let endpoint = URL(string: "\(Self.backendServiceBaseURL)/api/schedule/sync")!
 
         syncState = .syncing
 
@@ -304,8 +293,6 @@ final class AppSessionStore: ObservableObject {
 
     func loadLatestScheduleSnapshot(suppressErrors: Bool = false) async {
         let profileKey = schoolAccount.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = normalizedBackendBaseURL
-
         guard !profileKey.isEmpty else {
             clearScheduleState()
             if !suppressErrors {
@@ -314,12 +301,7 @@ final class AppSessionStore: ObservableObject {
             return
         }
 
-        guard let endpoint = URL(string: "\(baseURL)/api/schedule/\(profileKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? profileKey)") else {
-            if !suppressErrors {
-                syncState = .failed("後端網址格式錯誤")
-            }
-            return
-        }
+        let endpoint = URL(string: "\(Self.backendServiceBaseURL)/api/schedule/\(profileKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? profileKey)")!
 
         if !suppressErrors {
             syncState = .syncing
@@ -347,8 +329,6 @@ final class AppSessionStore: ObservableObject {
     func importAcademicHistory() async {
         let username = schoolAccount.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = schoolPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = normalizedBackendBaseURL
-
         historyImportErrorMessage = nil
         historyImportNoticeMessage = nil
 
@@ -357,10 +337,7 @@ final class AppSessionStore: ObservableObject {
             return
         }
 
-        guard let endpoint = URL(string: "\(baseURL)/api/history/import") else {
-            historyImportErrorMessage = "後端網址格式錯誤"
-            return
-        }
+        let endpoint = URL(string: "\(Self.backendServiceBaseURL)/api/history/import")!
 
         do {
             var request = URLRequest(url: endpoint)
@@ -650,7 +627,6 @@ final class AppSessionStore: ObservableObject {
             settings: CloudUserSettings(
                 schoolAccount: schoolAccount.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 schoolPassword: schoolPassword.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                backendBaseURL: backendBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 reminderMinutes: reminderMinutes
             )
         )
@@ -941,7 +917,6 @@ final class AppSessionStore: ObservableObject {
         isRestoringPersistedState = true
         self.schoolAccount = settings?.schoolAccount?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.schoolPassword = settings?.schoolPassword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        self.backendBaseURL = settings?.backendBaseURL?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? Self.defaultBackendBaseURL
         self.reminderMinutes = settings?.reminderMinutes ?? 10
         isRestoringPersistedState = false
     }
@@ -1065,7 +1040,6 @@ final class AppSessionStore: ObservableObject {
         isRestoringPersistedState = true
         schoolAccount = ""
         schoolPassword = ""
-        backendBaseURL = Self.defaultBackendBaseURL
         reminderMinutes = 10
         plannerTargets = .default
         plannerSemesters = Self.blankPlannerSemesters()
@@ -1148,10 +1122,6 @@ final class AppSessionStore: ObservableObject {
         ) ?? referenceDate
     }
 
-    private var normalizedBackendBaseURL: String {
-        backendBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    }
-
     private var supabaseURL: URL? {
         guard let rawValue = Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String else {
             return nil
@@ -1164,7 +1134,7 @@ final class AppSessionStore: ObservableObject {
     }
 
     private static let authSessionStorageKey = "courseplanner.supabase.session"
-    private static let defaultBackendBaseURL = "http://127.0.0.1:8000"
+    private static let backendServiceBaseURL = "https://course-planner-backend-production.up.railway.app"
 
     private static func iso8601String(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()

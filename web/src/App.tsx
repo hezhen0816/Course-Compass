@@ -370,16 +370,6 @@ export default function CoursePlannerWebApp() {
     }
   };
 
-  const plannedCourseCount = useMemo(
-    () => data.semesters.reduce((total, semester) => total + semester.courses.length, 0),
-    [data.semesters],
-  );
-
-  const plannedSemesterCount = useMemo(
-    () => data.semesters.filter((semester) => semester.courses.length > 0).length,
-    [data.semesters],
-  );
-
   if (authLoading || (session && dataLoading)) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50">載入中...</div>;
   }
@@ -389,9 +379,9 @@ export default function CoursePlannerWebApp() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen bg-gray-50">
       <Navbar 
-        userEmail={session?.user?.email || "訪客模式"}
+        userEmail={session?.user?.email || "功能演示模式"}
         syncStatus={session ? syncStatus : 'idle'}
         isDemoMode={isDemoMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -400,72 +390,9 @@ export default function CoursePlannerWebApp() {
         onExitDemo={() => setIsDemoMode(false)}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <section className="relative overflow-hidden rounded-[32px] bg-slate-950 px-6 py-8 text-white shadow-xl shadow-slate-900/10 sm:px-8">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.24),_transparent_34%),radial-gradient(circle_at_bottom_left,_rgba(99,102,241,0.18),_transparent_32%)]" />
-          <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(300px,1fr)] lg:items-end">
-            <div className="space-y-5">
-              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-sky-200/90">
-                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">Web Planner</span>
-                <span className="rounded-full border border-sky-300/25 bg-sky-400/10 px-3 py-1">桌面規劃</span>
-              </div>
-
-              <div className="space-y-3">
-                <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                  在大螢幕上整理學期、課程與畢業門檻。
-                </h1>
-                <p className="max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
-                  Web 版專注課程規劃、資料匯入與細節編修；課表同步與行動摘要則由 iPhone 端處理。
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-3 text-sm text-slate-200">
-                <span className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2">桌機優先的八學期編排</span>
-                <span className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2">支援 HTML 匯入與雲端同步</span>
-                <span className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2">課程細節與成績試算</span>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-              <div className="rounded-3xl border border-white/10 bg-white/8 p-5 backdrop-blur">
-                <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-400">已規劃課程</p>
-                <p className="mt-3 text-3xl font-semibold text-white">{plannedCourseCount}</p>
-                <p className="mt-2 text-sm text-slate-300">分布在 {plannedSemesterCount} 個學期</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/8 p-5 backdrop-blur">
-                <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-400">目前學分</p>
-                <p className="mt-3 text-3xl font-semibold text-white">{stats.total}</p>
-                <p className="mt-2 text-sm text-slate-300">距離總門檻 {Math.max(data.targets.total - stats.total, 0)} 學分</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-sky-400/18 to-indigo-400/12 p-5 backdrop-blur">
-                <p className="text-xs font-medium uppercase tracking-[0.22em] text-sky-100/70">跨裝置協作</p>
-                <p className="mt-3 text-lg font-semibold text-white">同一份規劃資料，可延續到 iPhone 端</p>
-                <p className="mt-2 text-sm text-slate-200">Web 與 iOS 共用資料，但互動流程各自獨立。</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          <div className="space-y-6 lg:col-span-3">
-            <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Web Focus</p>
-              <h2 className="mt-3 text-xl font-semibold text-slate-900">網頁版保留的內容</h2>
-              <div className="mt-4 space-y-3 text-sm text-slate-600">
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  八學期課程編排、課程新增編輯、排序與詳細資訊。
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  學分門檻設定、進度統計，以及臺科大成績 / 選課清單匯入。
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  {session ? '登入後會持續保存你的規劃資料。' : '訪客模式只保留目前頁面操作，不會寫入任何資料。'}
-                </div>
-              </div>
-            </div>
-
-            <Sidebar data={data} stats={stats} />
-          </div>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <Sidebar data={data} stats={stats} />
 
           <SemesterGrid 
             data={data} 
@@ -476,7 +403,7 @@ export default function CoursePlannerWebApp() {
             onMoveCourse={handleMoveCourse}
             onSortByCategory={handleSortCoursesByCategory}
           />
-        </section>
+        </div>
       </main>
 
       {isModalOpen && (
