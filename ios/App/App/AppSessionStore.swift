@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 private struct UserDataUpsertRequest: Encodable {
     let userID: String
@@ -31,6 +32,9 @@ final class AppSessionStore: ObservableObject {
         didSet {
             guard !isRestoringPersistedState else { return }
             queuePlannerSave()
+            Task {
+                await refreshClassReminders()
+            }
         }
     }
     @Published var syncState: ScheduleSyncState = .idle
@@ -47,6 +51,8 @@ final class AppSessionStore: ObservableObject {
     @Published var authNoticeMessage: String?
     @Published var historyImportErrorMessage: String?
     @Published var historyImportNoticeMessage: String?
+    @Published var reminderErrorMessage: String?
+    @Published var reminderNoticeMessage: String?
 
     private var authSession: SupabaseStoredSession?
     private var plannerSaveTask: Task<Void, Never>?
@@ -946,6 +952,9 @@ final class AppSessionStore: ObservableObject {
             )
         }
         upcomingCourses = Self.buildUpcomingCourses(from: scheduleEntries)
+        Task {
+            await refreshClassReminders()
+        }
     }
 
     private static func buildUpcomingCourses(from entries: [ScheduleEntry]) -> [UpcomingCourse] {
@@ -1031,6 +1040,11 @@ final class AppSessionStore: ObservableObject {
         authNoticeMessage = nil
         historyImportErrorMessage = nil
         historyImportNoticeMessage = nil
+        reminderErrorMessage = nil
+        reminderNoticeMessage = nil
+        Task {
+            await removeAllScheduledClassReminders()
+        }
         resetCloudBackedState()
         selectedTab = .home
         UserDefaults.standard.removeObject(forKey: Self.authSessionStorageKey)
@@ -1046,6 +1060,190 @@ final class AppSessionStore: ObservableObject {
         syncState = .idle
         clearScheduleState()
         isRestoringPersistedState = false
+    }
+
+    private func refreshClassReminders() async {
+        reminderErrorMessage = nil
+
+        guard reminderMinutes > 0 else {
+            await removeAllScheduledClassReminders()
+            reminderNoticeMessage = "課前提醒已關閉"
+            return
+        }
+
+        guard !scheduleEntries.isEmpty else {
+            await removeAllScheduledClassReminders()
+            reminderNoticeMessage = "目前沒有可建立提醒的課程"
+            return
+        }
+
+        do {
+            let center = UNUserNotificationCenter.current()
+            let isAuthorized = try await ensureNotificationAuthorization(center: center)
+            guard isAuthorized else {
+                await removeAllScheduledClassReminders(center: center)
+                reminderErrorMessage = "尚未允許通知，請到 iPhone 的設定開啟通知權限"
+                return
+            }
+
+            await removeAllScheduledClassReminders(center: center)
+
+            var scheduledCount = 0
+            for entry in scheduleEntries {
+                guard let triggerComponents = reminderTriggerComponents(for: entry, reminderMinutes: reminderMinutes) else {
+                    continue
+                }
+
+                let content = UNMutableNotificationContent()
+                content.title = "\(reminderMinutes) 分鐘後上課"
+                content.body = reminderBody(for: entry)
+                content.sound = .default
+
+                let request = UNNotificationRequest(
+                    identifier: reminderIdentifier(for: entry),
+                    content: content,
+                    trigger: UNCalendarNotificationTrigger(dateMatching: triggerComponents, repeats: true)
+                )
+
+                try await addNotificationRequest(request, center: center)
+                scheduledCount += 1
+            }
+
+            reminderNoticeMessage = scheduledCount > 0
+                ? "已建立 \(scheduledCount) 筆每週課前提醒"
+                : "目前沒有可建立提醒的課程"
+        } catch {
+            reminderErrorMessage = "建立課前提醒失敗：\(error.localizedDescription)"
+        }
+    }
+
+    private func ensureNotificationAuthorization(center: UNUserNotificationCenter) async throws -> Bool {
+        let settings = await notificationSettings(center: center)
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .notDetermined:
+            return try await requestNotificationAuthorization(center: center)
+        case .denied:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private func notificationSettings(center: UNUserNotificationCenter) async -> UNNotificationSettings {
+        await withCheckedContinuation { continuation in
+            center.getNotificationSettings { settings in
+                continuation.resume(returning: settings)
+            }
+        }
+    }
+
+    private func requestNotificationAuthorization(center: UNUserNotificationCenter) async throws -> Bool {
+        try await withCheckedThrowingContinuation { continuation in
+            center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+    }
+
+    private func addNotificationRequest(_ request: UNNotificationRequest, center: UNUserNotificationCenter) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            center.add(request) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
+    private func reminderTriggerComponents(for entry: ScheduleEntry, reminderMinutes: Int) -> DateComponents? {
+        let startComponents = Self.timeComponents(from: entry.timeRange)
+        let calendar = Calendar(identifier: .gregorian)
+        var matchingComponents = DateComponents()
+        matchingComponents.weekday = entry.weekday.calendarWeekday
+        matchingComponents.hour = startComponents.hour
+        matchingComponents.minute = startComponents.minute
+
+        guard
+            let nextStartDate = calendar.nextDate(
+                after: Date(),
+                matching: matchingComponents,
+                matchingPolicy: .nextTimePreservingSmallerComponents,
+                direction: .forward
+            ),
+            let reminderDate = calendar.date(byAdding: .minute, value: -reminderMinutes, to: nextStartDate)
+        else {
+            return nil
+        }
+
+        var components = DateComponents()
+        components.weekday = calendar.component(.weekday, from: reminderDate)
+        components.hour = calendar.component(.hour, from: reminderDate)
+        components.minute = calendar.component(.minute, from: reminderDate)
+        return components
+    }
+
+    private func reminderBody(for entry: ScheduleEntry) -> String {
+        [
+            entry.title,
+            entry.timeRange,
+            entry.room.isEmpty ? nil : entry.room,
+            entry.instructor.isEmpty ? nil : entry.instructor
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+    }
+
+    private func removeAllScheduledClassReminders(center: UNUserNotificationCenter = .current()) async {
+        let pendingIDs = await pendingReminderIdentifiers(center: center)
+        if !pendingIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: pendingIDs)
+        }
+
+        let deliveredIDs = await deliveredReminderIdentifiers(center: center)
+        if !deliveredIDs.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIDs)
+        }
+    }
+
+    private func reminderIdentifier(for entry: ScheduleEntry) -> String {
+        let rawValue = "\(entry.weekday.rawValue)-\(entry.timeRange)-\(entry.title)"
+        let sanitized = rawValue
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+        return "course-reminder-\(sanitized)"
+    }
+
+    private func pendingReminderIdentifiers(center: UNUserNotificationCenter) async -> [String] {
+        await withCheckedContinuation { continuation in
+            center.getPendingNotificationRequests { requests in
+                continuation.resume(
+                    returning: requests
+                        .map(\.identifier)
+                        .filter { $0.hasPrefix("course-reminder-") }
+                )
+            }
+        }
+    }
+
+    private func deliveredReminderIdentifiers(center: UNUserNotificationCenter) async -> [String] {
+        await withCheckedContinuation { continuation in
+            center.getDeliveredNotifications { notifications in
+                continuation.resume(
+                    returning: notifications
+                        .map(\.request.identifier)
+                        .filter { $0.hasPrefix("course-reminder-") }
+                )
+            }
+        }
     }
 
     private func makeURL(path: String) throws -> URL {
@@ -1159,6 +1357,17 @@ final class AppSessionStore: ObservableObject {
         var inserted = 0
         var updated = 0
         var skipped = 0
+    }
+
+    private static func timeComponents(from timeRange: String) -> DateComponents {
+        let startLabel = timeRange
+            .components(separatedBy: "-")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "09:00"
+        let parts = startLabel.split(separator: ":")
+        let hour = Int(parts.first ?? "9") ?? 9
+        let minute = Int(parts.dropFirst().first ?? "0") ?? 0
+        return DateComponents(hour: hour, minute: minute)
     }
 
 }

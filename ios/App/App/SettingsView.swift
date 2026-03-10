@@ -108,14 +108,24 @@ struct SettingsView: View {
 
                 Section("提醒") {
                     Picker("課前提醒", selection: $store.reminderMinutes) {
-                        ForEach([5, 10, 15, 30, 60], id: \.self) { minutes in
-                            Text("\(minutes) 分鐘前").tag(minutes)
+                        ForEach([0, 5, 10, 15, 30, 60], id: \.self) { minutes in
+                            Text(minutes == 0 ? "關閉" : "\(minutes) 分鐘前").tag(minutes)
                         }
                     }
 
-                    Text("提醒時間會保留在這台裝置上，目前不會建立系統通知。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    if let reminderErrorMessage = store.reminderErrorMessage {
+                        Text(reminderErrorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    } else if let reminderNoticeMessage = store.reminderNoticeMessage {
+                        Text(reminderNoticeMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("會使用 iPhone 系統通知建立每週課前提醒，第一次啟用時會要求通知權限。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("學分規劃") {
