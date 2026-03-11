@@ -805,10 +805,22 @@ def fetch_moodle_timeline_items(
 
 
 def filter_moodle_assignment_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actionable_modules = {"assign", "quiz", "workshop", "url", "page"}
+    actionable_event_types = {"due", "expectcompletionon"}
+
     assignments = [
         item
         for item in items
-        if item["action_label"] == "繳交作業" or "/mod/assign/" in str(item["event_url"])
+        if (
+            item["action_label"] == "繳交作業"
+            or "/mod/assign/" in str(item["event_url"])
+            or "/mod/assign/" in str(item["action_url"])
+            or (
+                str(item.get("module_name", "")).lower() in actionable_modules
+                and str(item.get("event_type", "")).lower() in actionable_event_types
+                and (item["action_url"] or item["event_url"])
+            )
+        )
     ]
     assignments.sort(key=lambda item: (item["due_at"], item["course_name"], item["title"]))
     return assignments
