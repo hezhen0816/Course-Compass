@@ -1,6 +1,6 @@
 .venv/
 __pycache__/
 login-timeout.html
-edu-need-page.html
+moodle-dashboard.html
 flow-log.md
-history-courses.json
+timeline-items.json

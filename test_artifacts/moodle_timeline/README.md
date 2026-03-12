@@ -1,11 +1,11 @@
-# 台科大歷史修課紀錄測試資料
+# 台科大 Moodle 時間軸測試資料
 
-這個資料夾包含一個可重跑的 Python 自動化腳本，用來登入 `https://stu.ntust.edu.tw/stueduneed/Edu_Need.aspx`，抓取學生必修課程查詢頁面中的歷史修課紀錄，並輸出可比對的代表性資料。
+這個資料夾包含一個可重跑的 Python 腳本，用來登入 `https://moodle2.ntust.edu.tw/my/`，抓取儀表板「時間軸」目前可見的待處理項目，並輸出代表性的待繳事項資料。
 
 ## Python 安裝
 
 ```bash
-cd /Users/hezhen/Project/course_planner/test_artifacts/edu_need_history
+cd /Users/hezhen/Project/course_planner/test_artifacts/moodle_timeline
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -13,10 +13,10 @@ python3 -m venv .venv
 ## Python 執行
 
 ```bash
-cd /Users/hezhen/Project/course_planner/test_artifacts/edu_need_history
+cd /Users/hezhen/Project/course_planner/test_artifacts/moodle_timeline
 NTUST_USERNAME="你的學號" \
 NTUST_PASSWORD="你的校務密碼" \
-.venv/bin/python fetch_edu_need_history.py
+.venv/bin/python fetch_moodle_timeline.py
 ```
 
 如需強制驗證站台憑證，可額外指定：
@@ -29,14 +29,15 @@ NTUST_VERIFY_SSL=true
 
 ## 保留的輸出
 
-- `history-courses.csv`: 平面化課程紀錄 CSV
+- `timeline-items.csv`: 時間軸目前可見項目 CSV
+- `timeline-assignments.csv`: 待繳事項與待完成項目 CSV
 - `run-summary.json`: 本次執行摘要
 
 ## 不追蹤的中間產物
 
 重跑腳本時，以下檔案只作為除錯用途，預設不納入版控：
 
-- `edu-need-page.html`
+- `moodle-dashboard.html`
 - `flow-log.md`
-- `history-courses.json`
+- `timeline-items.json`
 - `login-timeout.html`

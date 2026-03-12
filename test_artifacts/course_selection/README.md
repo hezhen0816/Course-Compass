@@ -1,6 +1,6 @@
 # 台科大選課清單測試資料
 
-這個資料夾包含一個可重跑的 Python 自動化腳本，用來登入 `https://courseselection.ntust.edu.tw/`、進入「選課清單」、保存原始頁面並輸出 CSV。
+這個資料夾包含一個可重跑的 Python 自動化腳本，用來登入 `https://courseselection.ntust.edu.tw/`、進入「選課清單」，並輸出可比對的代表性資料。
 
 ## Python 安裝
 
@@ -27,15 +27,21 @@ NTUST_VERIFY_SSL=true
 
 台科站台目前在 `requests` 下可能出現憑證鏈驗證問題，所以腳本預設使用 `NTUST_VERIFY_SSL=false`。
 
-## 產物
+## 保留的輸出
 
-- `courselist-page.html`: 選課清單頁原始 HTML
-- `selected-courses.json`: 課程清單 JSON
-- `schedule-slots.json`: 課表平面化 JSON
 - `courses.csv`: 課程清單 CSV
 - `schedule.csv`: 課表時段 CSV
 - `run-summary.json`: 本次執行摘要
-- `flow-log.md`: 從登入到開啟課表的流程紀錄
+
+## 不追蹤的中間產物
+
+重跑腳本時，以下檔案只作為除錯用途，預設不納入版控：
+
+- `courselist-page.html`
+- `flow-log.md`
+- `selected-courses.json`
+- `schedule-slots.json`
+- `login-timeout.html`
 
 ## 已驗證流程
 
