@@ -1092,6 +1092,7 @@ final class AppSessionStore: ObservableObject {
                 weekday: entry.weekdayKey,
                 title: entry.title,
                 timeRange: entry.timeRange,
+                slotTimes: entry.slotTimes,
                 room: entry.room,
                 instructor: entry.instructor,
                 accent: mapAccent(entry.accent)
@@ -1121,6 +1122,7 @@ final class AppSessionStore: ObservableObject {
                 title: entry.title,
                 subtitle: entry.instructor.isEmpty ? "課表已更新" : entry.instructor,
                 timeLabel: entry.timeRange,
+                slotTimes: entry.slotTimes,
                 room: entry.room.isEmpty ? "未提供地點" : entry.room,
                 weekday: entry.weekday,
                 note: entry.room.isEmpty ? "此課程未提供教室資訊" : "課表資料已更新"

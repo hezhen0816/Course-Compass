@@ -290,11 +290,7 @@ struct HomeView: View {
     }
 
     private func courseAccentColor(for course: UpcomingCourse, now: Date) -> Color {
-        let currentMinutes = Calendar.current.component(.hour, from: now) * 60 + Calendar.current.component(.minute, from: now)
-        let startMinutes = minutes(from: timeComponent(for: course, at: 0, fallbackHour: 9))
-        let endMinutes = minutes(from: timeComponent(for: course, at: 1, fallbackHour: 10))
-
-        if currentMinutes >= startMinutes && currentMinutes < endMinutes {
+        if case .inClass = course.countdownState(on: now) {
             return .orange
         }
         return .indigo
@@ -331,16 +327,17 @@ struct HomeView: View {
     }
 
     private func countdownText(for course: UpcomingCourse, now: Date = Date(), calendar: Calendar = .current) -> String? {
-        if let startDate = course.startDate(on: now, calendar: calendar),
-           let endDate = course.endDate(on: now, calendar: calendar) {
-            if now < startDate {
+        if let state = course.countdownState(on: now, calendar: calendar) {
+            switch state {
+            case .beforeClass(let startDate):
                 let minutes = max(1, Int(startDate.timeIntervalSince(now) / 60))
                 return "距離上課還有 \(minutes) 分鐘"
-            }
-
-            if now < endDate {
+            case .inClass(let endDate):
                 let minutes = max(1, Int(endDate.timeIntervalSince(now) / 60))
                 return "正在上課中，距離下課還有 \(minutes) 分鐘"
+            case .betweenSessions(let nextStartDate):
+                let minutes = max(1, Int(nextStartDate.timeIntervalSince(now) / 60))
+                return "下課中，距離下節上課還有 \(minutes) 分鐘"
             }
         }
 

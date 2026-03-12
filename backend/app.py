@@ -81,6 +81,7 @@ class ScheduleEntryPayload(BaseModel):
     weekday_label: str
     title: str
     time_range: str
+    slot_times: list[str] = []
     room: str
     instructor: str
     accent: str
@@ -518,6 +519,7 @@ def group_schedule_entries(courses: list[dict[str, Any]], slots: list[dict[str, 
                 "weekday_label": first_slot["weekday_label"],
                 "title": course_name,
                 "time_range": f"{start} - {end}",
+                "slot_times": [slot["time"] for slot in ordered],
                 "room": first_slot["location"],
                 "instructor": str(course.get("professor", "")),
                 "accent": accent_from_required_type(str(course.get("required_type", "")), course_name),
@@ -898,6 +900,27 @@ def load_snapshot(profile_key: str) -> dict[str, Any] | None:
     return rows[0]["payload"]
 
 
+def ensure_schedule_entry_slot_times(payload: dict[str, Any]) -> dict[str, Any]:
+    schedule_entries = payload.get("schedule_entries")
+    if not isinstance(schedule_entries, list) or not schedule_entries:
+        return payload
+
+    if all(isinstance(entry, dict) and entry.get("slot_times") for entry in schedule_entries):
+        return payload
+
+    courses = payload.get("courses")
+    slots = payload.get("slots")
+    if not isinstance(courses, list) or not isinstance(slots, list):
+        return payload
+
+    rebuilt_entries = group_schedule_entries(courses, slots)
+    return {
+        **payload,
+        "schedule_entries": rebuilt_entries,
+        "schedule_entry_count": len(rebuilt_entries),
+    }
+
+
 def persist_history_snapshot(profile_key: str, school_account: str, payload: dict[str, Any]) -> bool:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         return False
@@ -1031,6 +1054,7 @@ def get_latest_schedule(profile_key: str) -> SyncResponse:
         payload = load_snapshot(profile_key)
         if payload is None:
             raise HTTPException(status_code=404, detail="Supabase 找不到此 profile 的課表快照。")
+        payload = ensure_schedule_entry_slot_times(payload)
         return SyncResponse.model_validate(payload)
     except HTTPException:
         raise
