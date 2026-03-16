@@ -1094,6 +1094,9 @@ final class AppSessionStore: ObservableObject {
         if message.contains("connect/authorize") || message.contains("登入後無法進入目標頁面") {
             return "Moodle 登入後沒有完成驗證流程，請稍後再試。"
         }
+        if message.contains("Limit must be between 1 and 50") {
+            return "Moodle 待繳事項同步參數超出範圍，請重新同步。"
+        }
         return message
     }
 

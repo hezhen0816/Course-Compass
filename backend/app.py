@@ -737,7 +737,7 @@ def extract_moodle_timeline_config(soup: BeautifulSoup) -> dict[str, int | str]:
         "filter_label": "往後30天",
         "midnight": int(event_container.get("data-midnight", "0")),
         "days_limit": max(parsed_days_limit, 30),
-        "limit_num": max(parsed_limit_num, 100),
+        "limit_num": min(max(parsed_limit_num, 50), 50),
     }
 
 
