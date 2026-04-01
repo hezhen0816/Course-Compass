@@ -3,6 +3,7 @@ import SwiftUI
 struct AppShellView: View {
     @StateObject private var store = AppSessionStore()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var liveActivityRefreshTask: Task<Void, Never>?
 
     var body: some View {
         Group {
@@ -13,14 +14,26 @@ struct AppShellView: View {
             }
         }
         .environmentObject(store)
+        .onAppear {
+            updateLiveActivityRefreshLoop()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, store.isAuthenticated else {
+                updateLiveActivityRefreshLoop()
                 return
             }
 
             Task {
                 await store.refreshAppContent(suppressErrors: true)
             }
+            updateLiveActivityRefreshLoop()
+        }
+        .onChange(of: store.isAuthenticated) { _, _ in
+            updateLiveActivityRefreshLoop()
+        }
+        .onDisappear {
+            liveActivityRefreshTask?.cancel()
+            liveActivityRefreshTask = nil
         }
     }
 
@@ -71,6 +84,22 @@ struct AppShellView: View {
             .tag(AppTab.settings)
         }
         .tint(.indigo)
+    }
+
+    private func updateLiveActivityRefreshLoop() {
+        liveActivityRefreshTask?.cancel()
+        liveActivityRefreshTask = nil
+
+        guard scenePhase == .active, store.isAuthenticated else {
+            return
+        }
+
+        liveActivityRefreshTask = Task {
+            while !Task.isCancelled {
+                await store.refreshLiveActivityState()
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
     }
 }
 
