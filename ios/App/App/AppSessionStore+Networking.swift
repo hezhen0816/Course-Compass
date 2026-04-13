@@ -10,7 +10,7 @@ extension AppSessionStore {
                 NSLocalizedDescriptionKey: "雲端服務網址設定錯誤"
             ])
         }
-        return url
+        return url.absoluteURL
     }
 
     func applyAPIHeaders(to request: inout URLRequest) {
@@ -83,6 +83,6 @@ extension AppSessionStore {
         else {
             throw URLError(.badURL)
         }
-        return url
+        return url.absoluteURL
     }
 }
