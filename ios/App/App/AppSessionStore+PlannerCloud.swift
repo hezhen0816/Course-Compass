@@ -28,6 +28,9 @@ extension AppSessionStore {
                 authNoticeMessage = "已登入，可以開始建立你的規劃"
             }
         } catch {
+            if Self.isCancellation(error) {
+                return
+            }
             if !preserveExistingStateOnFailure {
                 resetCloudBackedState()
             }
@@ -59,6 +62,9 @@ extension AppSessionStore {
             try await persistPlannerData()
             authNoticeMessage = "規劃資料已保存到雲端"
         } catch {
+            if Self.isCancellation(error) {
+                return
+            }
             authErrorMessage = "保存雲端資料失敗：\(error.localizedDescription)"
         }
     }

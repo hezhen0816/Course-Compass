@@ -161,6 +161,9 @@ extension AppSessionStore {
                     await loadLatestMoodleAssignments(suppressErrors: true)
                 }
             } catch {
+                if Self.isCancellation(error) {
+                    return
+                }
                 clearAuthenticatedState()
                 authErrorMessage = "登入已失效，請重新登入"
             }

@@ -338,6 +338,10 @@ struct FreeRoomsView: View {
             nextStatus = nextResponse
             currentStatus = currentResponse
         } catch {
+            if AppSessionStore.isCancellation(error) {
+                isLoading = false
+                return
+            }
             errorMessage = error.localizedDescription
         }
         isLoading = false

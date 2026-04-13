@@ -35,6 +35,9 @@ extension AppSessionStore {
             let payload = try decoder.decode(MoodleAssignmentsResponse.self, from: data)
             apply(payload: payload)
         } catch {
+            if Self.isCancellation(error) {
+                return
+            }
             moodleAssignmentsErrorMessage = friendlyMoodleAssignmentsErrorMessage(for: error)
         }
     }
@@ -56,6 +59,9 @@ extension AppSessionStore {
             let payload = try decoder.decode(MoodleAssignmentsResponse.self, from: data)
             apply(payload: payload)
         } catch {
+            if Self.isCancellation(error) {
+                return
+            }
             if let nsError = error as NSError?, nsError.code == 404 {
                 clearMoodleAssignmentsState()
                 moodleAssignmentsErrorMessage = nil

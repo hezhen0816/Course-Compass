@@ -15,6 +15,9 @@ extension AppSessionStore {
                 await loadLatestMoodleAssignments(suppressErrors: suppressErrors)
             }
         } catch {
+            if Self.isCancellation(error) {
+                return
+            }
             clearAuthenticatedState()
             authErrorMessage = "登入已失效，請重新登入"
         }
@@ -70,6 +73,10 @@ extension AppSessionStore {
             apply(payload: payload)
             syncState = .synced
         } catch {
+            if Self.isCancellation(error) {
+                restoreScheduleSyncStateAfterCancellation()
+                return
+            }
             syncState = .failed(error.localizedDescription)
         }
     }
@@ -99,6 +106,10 @@ extension AppSessionStore {
             apply(payload: payload)
             syncState = .synced
         } catch {
+            if Self.isCancellation(error) {
+                restoreScheduleSyncStateAfterCancellation()
+                return
+            }
             if let nsError = error as NSError?, nsError.code == 404 {
                 clearScheduleState()
             }
@@ -166,6 +177,10 @@ extension AppSessionStore {
         Task {
             await refreshClassReminders()
         }
+    }
+
+    func restoreScheduleSyncStateAfterCancellation() {
+        syncState = lastSyncedAt == nil ? .idle : .synced
     }
 
     static func buildUpcomingCourses(from entries: [ScheduleEntry]) -> [UpcomingCourse] {
